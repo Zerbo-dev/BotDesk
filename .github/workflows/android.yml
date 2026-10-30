@@ -1,0 +1,104 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tdlib_ref:
+        description: "Commit ou branche TDLib (épinglez un SHA une fois le build validé)"
+        default: "master"
+
+env:
+  TDLIB_REF: ${{ github.event.inputs.tdlib_ref || vars.TDLIB_REF || 'master' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    env:
+      HAS_KEYSTORE: ${{ secrets.KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # ---------- TDLib compilé depuis la source officielle (mis en cache par révision) ----------
+      - name: Résoudre la révision TDLib
+        id: rev
+        run: |
+          SHA=$(git ls-remote https://github.com/tdlib/td.git "$TDLIB_REF" | head -n1 | cut -f1)
+          if [ -z "$SHA" ]; then SHA="$TDLIB_REF"; fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "TDLib révision : $SHA"
+
+      - name: Cache TDLib
+        id: tdcache
+        uses: actions/cache@v4
+        with:
+          path: tdlib-out
+          key: tdlib-android-${{ steps.rev.outputs.sha }}-v1
+
+      - name: Dépendances de compilation TDLib
+        if: steps.tdcache.outputs.cache-hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y gperf php-cli make git zip unzip cmake g++ perl curl
+
+      - name: Compiler TDLib (Android, toutes ABI)
+        if: steps.tdcache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          git clone https://github.com/tdlib/td.git td-src
+          cd td-src
+          git checkout "${{ steps.rev.outputs.sha }}"
+          cd example/android
+          ./fetch-sdk.sh
+          ./build-openssl.sh
+          ./build-tdlib.sh
+          echo "--- contenu de tdlib/ ---"
+          find tdlib -maxdepth 3 | head -50
+          OUT="$GITHUB_WORKSPACE/tdlib-out"
+          mkdir -p "$OUT/java/org/drinkless/tdlib" "$OUT/libs"
+          JAVA_SRC=$(dirname "$(find tdlib -name TdApi.java | head -n1)")
+          cp "$JAVA_SRC/Client.java" "$JAVA_SRC/TdApi.java" "$OUT/java/org/drinkless/tdlib/"
+          cp -r tdlib/libs/* "$OUT/libs/"
+          test -f "$OUT/libs/arm64-v8a/libtdjni.so"
+
+      # ---------- Application ----------
+      - name: Injecter TDLib dans le projet
+        run: |
+          mkdir -p app/src/main/java app/src/main/jniLibs
+          cp -r tdlib-out/java/org app/src/main/java/
+          cp -r tdlib-out/libs/* app/src/main/jniLibs/
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Build APK debug
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BotDesk-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+
+      # ---------- Release signée (optionnel : secrets KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD) ----------
+      - name: Build APK release signé
+        if: env.HAS_KEYSTORE == 'true'
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          KEYSTORE_PATH="$RUNNER_TEMP/release.keystore" gradle :app:assembleRelease --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        if: env.HAS_KEYSTORE == 'true'
+        with:
+          name: BotDesk-release-apk
+          path: app/build/outputs/apk/release/*.apk
