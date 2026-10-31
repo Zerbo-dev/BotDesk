@@ -16,6 +16,8 @@ data class BotMeta(
     val favorite: Boolean = false,
     val displayName: String? = null,
     val description: String? = null,
+    val muted: Boolean = false,
+    val pinnedCommands: List<String> = emptyList(),
 )
 
 data class AppConfig(
@@ -24,10 +26,20 @@ data class AppConfig(
     val backupChannels: Set<Long> = emptySet(),
     val alertKeywords: String = DEFAULT_ALERT_KEYWORDS,
     val sensitiveKeywords: String = DEFAULT_SENSITIVE_KEYWORDS,
+    /** "off" | "alerts" | "all" */
+    val notifyBots: String = "alerts",
+    val notifyBackups: Boolean = true,
+    val backgroundService: Boolean = false,
+    /** "dark" | "light" | "system" */
+    val theme: String = "dark",
+    /** Demander confirmation avant de télécharger un fichier plus gros (en Mo). 0 = jamais. */
+    val confirmDownloadMb: Int = 100,
+    /** Durée de conservation de l'historique des fichiers (jours). 0 = illimitée (plafonnée). */
+    val indexRetentionDays: Int = 90,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("app", "botdesk")
-        put("version", 1)
+        put("version", 2)
         put("categories", JSONArray().also { a ->
             categories.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name)) }
         })
@@ -35,6 +47,8 @@ data class AppConfig(
             bots.forEach { (id, m) ->
                 o.put(id.toString(), JSONObject().apply {
                     put("favorite", m.favorite)
+                    put("muted", m.muted)
+                    put("pinnedCommands", JSONArray().also { a -> m.pinnedCommands.forEach { a.put(it) } })
                     m.categoryId?.let { put("categoryId", it) }
                     m.displayName?.let { put("displayName", it) }
                     m.description?.let { put("description", it) }
@@ -44,6 +58,12 @@ data class AppConfig(
         put("backupChannels", JSONArray().also { a -> backupChannels.forEach { a.put(it) } })
         put("alertKeywords", alertKeywords)
         put("sensitiveKeywords", sensitiveKeywords)
+        put("notifyBots", notifyBots)
+        put("notifyBackups", notifyBackups)
+        put("backgroundService", backgroundService)
+        put("theme", theme)
+        put("confirmDownloadMb", confirmDownloadMb)
+        put("indexRetentionDays", indexRetentionDays)
     }
 
     companion object {
@@ -67,6 +87,8 @@ data class AppConfig(
                         favorite = m.optBoolean("favorite", false),
                         displayName = m.str("displayName"),
                         description = m.str("description"),
+                        muted = m.optBoolean("muted", false),
+                        pinnedCommands = m.optJSONArray("pinnedCommands")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
                     )
                 }
             }
@@ -78,12 +100,18 @@ data class AppConfig(
                 backupChannels = ch,
                 alertKeywords = o.str("alertKeywords") ?: DEFAULT_ALERT_KEYWORDS,
                 sensitiveKeywords = o.str("sensitiveKeywords") ?: DEFAULT_SENSITIVE_KEYWORDS,
+                notifyBots = o.str("notifyBots") ?: "alerts",
+                notifyBackups = o.optBoolean("notifyBackups", true),
+                backgroundService = o.optBoolean("backgroundService", false),
+                theme = o.str("theme") ?: "dark",
+                confirmDownloadMb = o.optInt("confirmDownloadMb", 100),
+                indexRetentionDays = o.optInt("indexRetentionDays", 90),
             )
         }
     }
 }
 
-/** Configuration locale (catégories, favoris, canaux de sauvegarde, mots-clés), stockée en JSON. */
+/** Configuration locale (catégories, favoris, canaux de sauvegarde, préférences), stockée en JSON. */
 class LocalStore(context: Context) {
     private val file = File(context.filesDir, "botdesk_config.json")
     val config = MutableStateFlow(load())

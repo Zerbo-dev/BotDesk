@@ -1,10 +1,12 @@
 package com.botdesk.app.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
@@ -20,12 +22,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.fragment.app.FragmentActivity
 import com.botdesk.app.td.AuthUi
 
-private enum class Tab(val label: String, val icon: ImageVector) {
+enum class Tab(val label: String, val icon: ImageVector) {
     Home("Accueil", Icons.Default.Home),
     Bots("Bots", Icons.Default.Face),
+    Messages("Messages", Icons.Default.Email),
     Backups("Sauvegardes", Icons.Default.DateRange),
     Alerts("Alertes", Icons.Default.Warning),
-    Settings("Paramètres", Icons.Default.Settings),
+    Settings("Réglages", Icons.Default.Settings),
 }
 
 @Composable
@@ -38,7 +41,7 @@ fun Root(activity: FragmentActivity) {
         LockScreen(activity)
     } else {
         when (val a = auth) {
-            is AuthUi.Starting -> LoadingScreen("Démarrage…")
+            is AuthUi.Starting -> SplashScreen()
             is AuthUi.NeedCredentials -> CredentialsScreen()
             is AuthUi.WaitPhone, is AuthUi.WaitCode, is AuthUi.WaitPassword -> LoginScreen(a)
             is AuthUi.Unsupported -> LoadingScreen("Étape de connexion non prise en charge : ${a.state}")
@@ -49,11 +52,31 @@ fun Root(activity: FragmentActivity) {
 
 @Composable
 private fun Shell(activity: FragmentActivity) {
+    val app = LocalApp.current
     var tab by remember { mutableStateOf(Tab.Home) }
     var chatId by remember { mutableStateOf<Long?>(null) }
     var channelId by remember { mutableStateOf<Long?>(null) }
+    var showHistory by remember { mutableStateOf(false) }
 
-    BackHandler(enabled = chatId != null || channelId != null) { chatId = null; channelId = null }
+    // Ouverture depuis une notification
+    val pending by app.pendingChat.collectAsState()
+    LaunchedEffect(pending) {
+        pending?.let { id ->
+            showHistory = false; channelId = null
+            if (app.tg.chat(id)?.let { app.tg.isBotChat(it) } == false) channelId = id else chatId = id
+            app.pendingChat.value = null
+        }
+    }
+
+    BackHandler(enabled = chatId != null || channelId != null || showHistory) {
+        chatId = null; channelId = null; showHistory = false
+    }
+
+    val openSource: (Long) -> Unit = { id ->
+        val chat = app.tg.chat(id)
+        showHistory = false
+        if (chat != null && app.tg.isBotChat(chat)) chatId = id else channelId = id
+    }
 
     val c = chatId
     val ch = channelId
@@ -61,21 +84,30 @@ private fun Shell(activity: FragmentActivity) {
         ChatScreen(c) { chatId = null }
     } else if (ch != null) {
         BackupFilesScreen(ch) { channelId = null }
+    } else if (showHistory) {
+        HistoryScreen(onOpen = openSource) { showHistory = false }
     } else {
         Scaffold(
             bottomBar = {
                 NavigationBar {
                     Tab.values().forEach { t ->
-                        NavigationBarItem(selected = tab == t, onClick = { tab = t }, icon = { Icon(t.icon, t.label) }, label = { Text(t.label) })
+                        NavigationBarItem(
+                            selected = tab == t,
+                            onClick = { tab = t },
+                            icon = { Icon(t.icon, t.label) },
+                            label = { Text(t.label, maxLines = 1) },
+                            alwaysShowLabel = false,
+                        )
                     }
                 }
             },
         ) { pad ->
-            androidx.compose.foundation.layout.Box(Modifier.padding(pad).fillMaxSize()) {
+            Box(Modifier.padding(pad).fillMaxSize()) {
                 when (tab) {
-                    Tab.Home -> HomeScreen({ chatId = it }, { channelId = it })
+                    Tab.Home -> HomeScreen({ chatId = it }, { channelId = it }) { tab = it }
                     Tab.Bots -> BotsScreen { chatId = it }
-                    Tab.Backups -> BackupsScreen { channelId = it }
+                    Tab.Messages -> MessagesScreen { chatId = it }
+                    Tab.Backups -> BackupsScreen({ channelId = it }) { showHistory = true }
                     Tab.Alerts -> AlertsScreen { chatId = it }
                     Tab.Settings -> SettingsScreen(activity)
                 }

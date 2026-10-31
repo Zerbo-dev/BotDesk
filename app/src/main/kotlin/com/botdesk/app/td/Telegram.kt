@@ -34,7 +34,14 @@ sealed interface AuthUi {
     data class Unsupported(val state: String) : AuthUi
 }
 
-data class BackupFile(val msgId: Long, val chatId: Long, val date: Int, val doc: TdApi.Document, val caption: String)
+data class BackupFile(
+    val msgId: Long,
+    val chatId: Long,
+    val date: Int,
+    val doc: TdApi.Document,
+    val caption: String,
+    val sender: String = "",
+)
 
 /** Seule classe qui parle à TDLib. Le reste de l'app ne voit que des flux et des fonctions suspend. */
 class Telegram(
@@ -51,6 +58,9 @@ class Telegram(
     private val _events = MutableSharedFlow<TdApi.Object>(extraBufferCapacity = 256)
     val msgEvents: SharedFlow<TdApi.Object> = _events.asSharedFlow()
 
+    val myName = MutableStateFlow<String?>(null)
+
+    private val missingUsers = ConcurrentHashMap.newKeySet<Long>()
     private val chats = ConcurrentHashMap<Long, TdApi.Chat>()
     private val users = ConcurrentHashMap<Long, TdApi.User>()
 
@@ -108,12 +118,13 @@ class Telegram(
             is TdApi.AuthorizationStateWaitPassword -> auth.value = AuthUi.WaitPassword(s.passwordHint ?: "")
             is TdApi.AuthorizationStateReady -> {
                 auth.value = AuthUi.Ready
+                scope.launch { try { myName.value = request(TdApi.GetMe()).firstName } catch (e: Exception) { } }
                 scope.launch { try { loadChats() } catch (e: Exception) { /* réessayé via le bouton Actualiser */ } }
             }
             is TdApi.AuthorizationStateLoggingOut, is TdApi.AuthorizationStateClosing -> auth.value = AuthUi.Starting
             is TdApi.AuthorizationStateClosed -> {
                 client = null
-                chats.clear(); users.clear(); bump()
+                chats.clear(); users.clear(); missingUsers.clear(); myName.value = null; bump()
                 auth.value = AuthUi.Starting
                 scope.launch { start() }
             }
@@ -243,6 +254,24 @@ class Telegram(
         return request(req)
     }
 
+    private suspend fun userName(id: Long): String {
+        if (id == 0L || id in missingUsers) return ""
+        val u = users[id] ?: try {
+            request(TdApi.GetUser(id)).also { users[id] = it }
+        } catch (e: Exception) {
+            missingUsers.add(id)
+            null
+        }
+        return u?.let { (it.firstName + " " + it.lastName).trim() } ?: ""
+    }
+
+    private suspend fun senderOf(m: TdApi.Message): String {
+        if (m.viaBotUserId != 0L) return userName(m.viaBotUserId)
+        val s = m.senderId
+        if (s is TdApi.MessageSenderUser) return userName(s.userId)
+        return m.authorSignature ?: ""
+    }
+
     suspend fun backupFiles(chatId: Long, maxPages: Int = 5): List<BackupFile> {
         val out = mutableListOf<BackupFile>()
         var from = 0L
@@ -251,10 +280,37 @@ class Telegram(
             if (page.isEmpty()) break
             for (m in page) {
                 val d = m.content as? TdApi.MessageDocument ?: continue
-                out += BackupFile(m.id, chatId, m.date, d.document, d.caption.text)
+                out += BackupFile(m.id, chatId, m.date, d.document, d.caption.text, senderOf(m))
             }
             from = page.last().id
         }
         return out
+    }
+
+    // ---------- recherche et stockage ----------
+
+    suspend fun searchInChat(chatId: Long, query: String, limit: Int = 20): List<TdApi.Message> {
+        val r = TdApi.SearchChatMessages()
+        r.chatId = chatId
+        r.query = query
+        r.fromMessageId = 0L
+        r.offset = 0
+        r.limit = limit
+        val res = request(r)
+        return res.messages?.filterNotNull() ?: emptyList()
+    }
+
+    suspend fun storageBytes(): Long = request(TdApi.GetStorageStatisticsFast()).filesSize
+
+    suspend fun clearDownloads() {
+        val r = TdApi.OptimizeStorage()
+        r.size = 0L
+        r.ttl = -1
+        r.count = -1
+        r.immunityDelay = 0
+        r.fileTypes = arrayOf<TdApi.FileType>()
+        r.chatIds = LongArray(0)
+        r.excludeChatIds = LongArray(0)
+        request(r)
     }
 }

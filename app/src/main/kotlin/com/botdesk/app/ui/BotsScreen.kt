@@ -93,6 +93,7 @@ fun BotsScreen(onOpenChat: (Long) -> Unit) {
         var name by remember(id) { mutableStateOf(meta.displayName ?: "") }
         var desc by remember(id) { mutableStateOf(meta.description ?: "") }
         var cat by remember(id) { mutableStateOf(meta.categoryId) }
+        var muted by remember(id) { mutableStateOf(meta.muted) }
         AlertDialog(
             onDismissRequest = { editing = null },
             title = { Text("Modifier le bot") },
@@ -100,6 +101,9 @@ fun BotsScreen(onOpenChat: (Long) -> Unit) {
                 Column {
                     OutlinedTextField(name, { name = it }, label = { Text(chat?.title ?: "Nom affiché") }, singleLine = true)
                     OutlinedTextField(desc, { desc = it }, label = { Text("Description") })
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                        Text("Notifications en sourdine", Modifier.weight(1f)); Switch(muted, { muted = it })
+                    }
                     Text("Catégorie", modifier = Modifier.padding(top = 8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) { RadioButton(cat == null, { cat = null }); Text("Aucune") }
                     cfg.categories.forEach { c ->
@@ -110,7 +114,7 @@ fun BotsScreen(onOpenChat: (Long) -> Unit) {
             confirmButton = {
                 TextButton(onClick = {
                     app.store.update {
-                        it.copy(bots = it.bots + (id to meta.copy(displayName = name.ifBlank { null }, description = desc.ifBlank { null }, categoryId = cat)))
+                        it.copy(bots = it.bots + (id to meta.copy(displayName = name.ifBlank { null }, description = desc.ifBlank { null }, categoryId = cat, muted = muted)))
                     }
                     editing = null
                 }) { Text("Enregistrer") }

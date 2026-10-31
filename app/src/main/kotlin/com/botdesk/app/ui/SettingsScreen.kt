@@ -2,7 +2,11 @@
 
 package com.botdesk.app.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.core.content.ContextCompat
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -43,6 +47,18 @@ fun SettingsScreen(activity: FragmentActivity) {
     var renaming by remember { mutableStateOf<Category?>(null) }
     var exportPwd by remember { mutableStateOf<String?>(null) }
     var importBytes by remember { mutableStateOf<ByteArray?>(null) }
+    var storageTick by remember { mutableStateOf(0) }
+    val indexed by app.index.items.collectAsState()
+    val storage by produceState<Long?>(null, storageTick) { value = try { app.tg.storageBytes() } catch (e: Exception) { null } }
+
+    val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (!ok) toast(ctx, "Notifications refusées : activez-les dans les réglages Android de BotDesk.")
+    }
+    fun ensureNotifPermission() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
 
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
         val pwd = exportPwd
@@ -111,6 +127,65 @@ fun SettingsScreen(activity: FragmentActivity) {
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(sens, { sens = it }, label = { Text("Mots-clés d'actions à confirmer") }, modifier = Modifier.fillMaxWidth())
             TextButton(onClick = { app.store.update { it.copy(alertKeywords = alerts, sensitiveKeywords = sens) }; toast(ctx, "Enregistré") }) { Text("Enregistrer les mots-clés") }
+        }
+
+        item { SectionTitle("Apparence") }
+        item {
+            ChipRow(listOf("system" to "Système", "dark" to "Sombre", "light" to "Clair"), cfg.theme) { v -> app.store.update { it.copy(theme = v) } }
+        }
+
+        item { SectionTitle("Notifications") }
+        item {
+            Text("Messages des bots", style = MaterialTheme.typography.bodyMedium)
+            ChipRow(listOf("off" to "Aucune", "alerts" to "Alertes", "all" to "Tous"), cfg.notifyBots) { v ->
+                app.store.update { it.copy(notifyBots = v) }
+                if (v != "off") ensureNotifPermission()
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                Text("Nouvelle sauvegarde dans un dépôt", Modifier.weight(1f))
+                Switch(cfg.notifyBackups, { on -> app.store.update { it.copy(notifyBackups = on) }; if (on) ensureNotifPermission() })
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Rester connecté en arrière-plan", Modifier.weight(1f))
+                Switch(cfg.backgroundService, { on ->
+                    app.store.update { it.copy(backgroundService = on) }
+                    if (on) ensureNotifPermission()
+                    app.notifier.syncService()
+                })
+            }
+            Text(
+                "Sans l'arrière-plan, les notifications n'arrivent que lorsque l'app est ouverte ou récemment utilisée. " +
+                    "L'arrière-plan affiche une notification permanente et consomme de la batterie ; sur certains téléphones, " +
+                    "désactivez l'optimisation de batterie pour BotDesk. Avec un PIN actif, le contenu des messages est masqué. " +
+                    "Le mode silencieux se règle bot par bot (onglet Bots, bouton Modifier).",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        item { SectionTitle("Stockage et téléchargements") }
+        item {
+            Text("Cache de fichiers : " + (storage?.let { fmtSize(it) } ?: "—"))
+            Text("Confirmer avant de télécharger un fichier de plus de :", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+            ChipRow(listOf("0" to "Jamais", "50" to "50 Mo", "100" to "100 Mo", "500" to "500 Mo"), cfg.confirmDownloadMb.toString()) { v ->
+                app.store.update { it.copy(confirmDownloadMb = v.toInt()) }
+            }
+            TextButton(onClick = {
+                scope.launch {
+                    try { app.tg.clearDownloads(); toast(ctx, "Cache vidé") } catch (e: Exception) { toast(ctx, "Impossible : " + e.message) }
+                    storageTick++
+                }
+            }) { Text("Vider le cache de téléchargement") }
+        }
+
+        item { SectionTitle("Historique des fichiers") }
+        item {
+            Text("${indexed.size} fichier(s) indexé(s) (métadonnées uniquement)")
+            Text("Conserver :", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+            ChipRow(listOf("30" to "30 jours", "90" to "90 jours", "365" to "1 an", "0" to "Illimité"), cfg.indexRetentionDays.toString()) { v ->
+                app.store.update { it.copy(indexRetentionDays = v.toInt()) }
+                app.index.applyRetention()
+            }
+            TextButton(onClick = { app.index.clear(); toast(ctx, "Historique vidé") }) { Text("Vider l'historique") }
         }
 
         item { SectionTitle("Configuration") }
@@ -234,4 +309,11 @@ private fun PasswordDialog(title: String, confirmField: Boolean, onDismiss: () -
         confirmButton = { TextButton(onClick = { if (a.length >= 8 && (!confirmField || a == b)) onOk(a) }) { Text("OK") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
     )
+}
+
+@Composable
+private fun ChipRow(options: List<Pair<String, String>>, selected: String, onSelect: (String) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.forEach { (value, label) -> FilterChip(selected == value, { onSelect(value) }, { Text(label) }) }
+    }
 }

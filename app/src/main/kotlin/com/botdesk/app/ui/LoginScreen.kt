@@ -34,6 +34,26 @@ fun LoadingScreen(text: String) {
 }
 
 @Composable
+fun SplashScreen() {
+    CenteredColumn {
+        Text(
+            androidx.compose.ui.text.buildAnnotatedString {
+                append("Bot")
+                pushStyle(androidx.compose.ui.text.SpanStyle(color = Accent))
+                append("Desk")
+                pop()
+            },
+            style = MaterialTheme.typography.displayMedium,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text("Vos bots. Vos outils.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Tout au même endroit.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(24.dp))
+        LinearProgressIndicator(Modifier.width(120.dp))
+    }
+}
+
+@Composable
 fun CredentialsScreen() {
     val app = LocalApp.current
     var id by remember { mutableStateOf("") }

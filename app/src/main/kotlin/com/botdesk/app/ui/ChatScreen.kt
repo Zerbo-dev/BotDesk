@@ -5,6 +5,10 @@ package com.botdesk.app.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,13 +17,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.botdesk.app.data.BotMeta
+import com.botdesk.app.td.BackupFile
 import com.botdesk.app.td.Msg
 import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
@@ -41,7 +48,7 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var confirm by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
     var commands by remember(chatId) { mutableStateOf<List<Pair<String, String>>?>(null) }
-    var menu by remember { mutableStateOf(false) }
+    var showCommands by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     fun loadMore() {
@@ -61,6 +68,10 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit) {
     }
 
     LaunchedEffect(chatId) { loadMore() }
+    LaunchedEffect(chatId) {
+        val uid = tg.chat(chatId)?.let { tg.botUserId(it) }
+        commands = if (uid == null) emptyList() else try { tg.botCommands(uid) } catch (e: Exception) { emptyList() }
+    }
 
     LaunchedEffect(chatId) {
         tg.msgEvents.collect { e ->
@@ -124,39 +135,98 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit) {
         if (containsAny(b.text, cfg.sensitiveKeywords)) confirm = ("Bouton : " + b.text) to run else run()
     }
 
+    fun togglePin(cmd: String) {
+        val meta = app.store.config.value.bots[chatId] ?: BotMeta()
+        val pins = if (cmd in meta.pinnedCommands) meta.pinnedCommands - cmd else meta.pinnedCommands + cmd
+        app.store.update { it.copy(bots = it.bots + (chatId to meta.copy(pinnedCommands = pins))) }
+    }
+
     Column(Modifier.fillMaxSize().imePadding()) {
         TopAppBar(
             title = { Column { Text(cfg.bots[chatId]?.displayName ?: chat?.title ?: "Chat"); Text(activityLabel(chat?.lastMessage?.date ?: 0), style = MaterialTheme.typography.bodySmall) } },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") } },
-            actions = {
-                IconButton(onClick = {
-                    menu = true
-                    if (commands == null && chat != null) {
-                        val uid = tg.botUserId(chat)
-                        if (uid != null) scope.launch { commands = try { tg.botCommands(uid) } catch (e: Exception) { emptyList() } }
-                    }
-                }) { Icon(Icons.Default.MoreVert, "Commandes") }
-                DropdownMenu(menu, { menu = false }) {
-                    val cmds = commands
-                    if (cmds == null) DropdownMenuItem(text = { Text("Chargement…") }, onClick = {})
-                    else if (cmds.isEmpty()) DropdownMenuItem(text = { Text("Aucune commande déclarée") }, onClick = {})
-                    else cmds.forEach { (c, d) ->
-                        DropdownMenuItem(text = { Column { Text("/$c"); Text(d, style = MaterialTheme.typography.bodySmall) } }, onClick = { menu = false; trySend("/$c") })
-                    }
-                }
-            },
         )
 
         ErrorText(error)
         LazyColumn(Modifier.weight(1f).padding(horizontal = 8.dp), state = listState, reverseLayout = true) {
-            items(msgs, key = { it.id }) { m -> Bubble(m, save) { b -> onInline(m, b) } }
+            items(msgs, key = { it.id }) { m -> Bubble(m, { d -> save(BackupFile(m.id, chatId, m.date, d, "", "")) }) { b -> onInline(m, b) } }
             if (loading) item { Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(20.dp)) } }
         }
 
+        val kb = msgs.firstOrNull { !it.isOutgoing && it.replyMarkup != null }?.replyMarkup as? TdApi.ReplyMarkupShowKeyboard
+        kb?.rows?.forEach { row ->
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { b -> OutlinedButton(onClick = { trySend(b.text) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(b.text, maxLines = 1) } }
+            }
+        }
+        val pins = cfg.bots[chatId]?.pinnedCommands ?: emptyList()
+        val typed = input.trim()
+        val suggestions = if (typed.startsWith("/") && !typed.contains(" ")) {
+            (commands ?: emptyList()).map { it.first }.filter { ("/" + it).startsWith(typed, true) && "/$it" != typed }
+        } else emptyList()
+        if (suggestions.isNotEmpty() || (input.isBlank() && pins.isNotEmpty())) {
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (suggestions.isNotEmpty()) {
+                    suggestions.forEach { c -> SuggestionChip(onClick = { input = "/$c " }, label = { Text("/$c") }) }
+                } else {
+                    pins.forEach { c ->
+                        AssistChip(onClick = { trySend("/$c") }, label = { Text((if (containsAny(c, cfg.sensitiveKeywords)) "⚠ " else "") + "/$c") })
+                    }
+                }
+            }
+        }
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(input, { input = it }, placeholder = { Text("Écrire un message…") }, modifier = Modifier.weight(1f), maxLines = 4)
+            IconButton(onClick = { showCommands = true }) { Text("/", style = MaterialTheme.typography.titleLarge, color = Accent) }
+            OutlinedTextField(input, { input = it }, placeholder = { Text("Message ou /commande") }, modifier = Modifier.weight(1f), maxLines = 4)
             IconButton(onClick = { trySend(input); input = "" }, enabled = input.isNotBlank()) {
                 Icon(Icons.AutoMirrored.Filled.Send, "Envoyer", tint = Accent)
+            }
+        }
+    }
+
+    if (showCommands) {
+        var filter by remember { mutableStateOf("") }
+        val cmdList = commands
+        val pinned = cfg.bots[chatId]?.pinnedCommands ?: emptyList()
+        ModalBottomSheet(onDismissRequest = { showCommands = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+            Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
+                Text("Commandes", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Toucher une commande l'insère dans le message (pour ajouter des arguments). ➤ l'envoie tout de suite. ♥ l'épingle en raccourci.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 6.dp),
+                )
+                OutlinedTextField(filter, { filter = it }, label = { Text("Filtrer") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                val shown = (cmdList ?: emptyList())
+                    .filter { filter.isBlank() || it.first.contains(filter, true) || it.second.contains(filter, true) }
+                    .sortedByDescending { it.first in pinned }
+                LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                    if (cmdList == null) item { Text("Chargement…", modifier = Modifier.padding(top = 12.dp)) }
+                    else if (shown.isEmpty()) item {
+                        Text(
+                            if (cmdList.isEmpty()) "Ce bot ne déclare aucune commande. Tapez-la directement dans le message." else "Aucun résultat.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp),
+                        )
+                    }
+                    items(shown, key = { it.first }) { (c, d) ->
+                        val sensitive = containsAny(c, cfg.sensitiveKeywords)
+                        Row(
+                            Modifier.fillMaxWidth().clickable { input = "/$c "; showCommands = false }.padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("/$c" + if (sensitive) "  ⚠" else "", style = MaterialTheme.typography.titleSmall)
+                                if (d.isNotBlank()) Text(d, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            IconButton(onClick = { togglePin(c) }) {
+                                Icon(if (c in pinned) Icons.Default.Favorite else Icons.Default.FavoriteBorder, "Épingler", tint = if (c in pinned) Accent else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            IconButton(onClick = { showCommands = false; trySend("/$c") }) {
+                                Icon(Icons.AutoMirrored.Filled.Send, "Envoyer", tint = Accent)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -183,14 +253,14 @@ private fun Bubble(m: TdApi.Message, onSave: (TdApi.Document) -> Unit, onInline:
                 .background(if (out) Accent else MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
                 .padding(10.dp)
         ) {
-            Text(Msg.text(m))
+            Text(Msg.text(m), color = if (out) Color.White else MaterialTheme.colorScheme.onSurface)
             Msg.document(m)?.let { d ->
                 TextButton(onClick = { onSave(d) }) { Text("Enregistrer · " + fmtSize(d.document.size)) }
             }
             Text(
                 fmtDate(m.date) + if (failed) " · ⚠ échec" else if (pending) " · ⏳" else "",
                 style = MaterialTheme.typography.labelSmall,
-                color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (failed) MaterialTheme.colorScheme.error else if (out) Color(0xFFD8E0FF) else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         val rm = m.replyMarkup

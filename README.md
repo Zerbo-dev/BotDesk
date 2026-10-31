@@ -18,19 +18,23 @@ APK signé (optionnel) : ajoutez les secrets `KEYSTORE_BASE64`, `KEYSTORE_PASSWO
 3. Onglet **Sauvegardes** : activez les canaux/groupes qui servent de dépôts.
 4. Paramètres : définissez un PIN (4 chiffres) et, si possible, la biométrie.
 
-## Fonctions de la V1
+## Fonctions
 
-- Détection des bots : conversations privées dont l'interlocuteur est un bot ; favoris, catégories, noms et descriptions locaux.
-- Chat : envoi de messages et de commandes (liste des commandes déclarées par le bot), boutons inline (callback/lien), réception de documents.
-- Confirmation avant toute action dont le texte contient un mot-clé sensible (configurable).
-- Tableau de bord : activité récente, favoris, dernières sauvegardes. Sans signal fiable, le statut reste « inconnu » (une activité récente n'est pas une preuve de bon fonctionnement).
-- Sauvegardes : parcours des fichiers d'un canal (500 derniers messages max), recherche, téléchargement vers l'emplacement de votre choix, aperçu texte, détection du format (extensible dans `FilePreview.kt`).
-- Alertes/rapports : messages récents des bots et dépôts, classés par mots-clés configurables.
-- Sécurité : PIN haché (PBKDF2), biométrie, verrouillage en arrière-plan, base TDLib chiffrée, export/import de configuration chiffré (AES-GCM).
+- **Accueil :** salutation, envoi rapide d'une commande à un bot (confirmation si action sensible), accès rapide aux sections, favoris, activité récente, dernières sauvegardes.
+- **Bots :** détection (conversations privées avec un bot), favoris, catégories, noms/descriptions locaux, sourdine par bot.
+- **Messages :** conversations par date, recherche dans l'historique des bots et des dépôts.
+- **Chat :** messages ; bouton « / » qui ouvre la liste des commandes du bot (filtre, insertion, envoi direct, épinglage) ; raccourcis épinglés au-dessus du clavier ; suggestions automatiques quand on tape « / » ; boutons inline, claviers de réponse, réception de fichiers.
+- **Sauvegardes :** l'écran n'affiche que les dépôts choisis (sélecteur via « Gérer les dépôts »), parcours (500 derniers messages), recherche par nom/légende/expéditeur, filtre par format, téléchargement tel quel vers l'emplacement de votre choix, aperçu texte, détection de format par signature, confirmation des gros fichiers, historique local des fichiers consultés (hors connexion).
+- **Alertes :** messages classés par mots-clés configurables.
+- **Notifications :** locales (aucun serveur de push) : bots (aucune/alertes/tous), nouvelles sauvegardes, mode « rester connecté en arrière-plan » (service de premier plan), contenu masqué si un PIN est actif.
+- **Réglages :** thème (système/sombre/clair), stockage (taille, vidage du cache, seuil de confirmation), durée de l'historique, mots-clés, catégories, export/import chiffré de la configuration, déconnexion.
+- **Sécurité :** PIN haché (PBKDF2), biométrie, verrouillage à la mise en arrière-plan, base TDLib chiffrée, clés API chiffrées (Keystore).
 
-## Hors périmètre V1 (à décider, cf. spécification)
+Les statuts de serveurs restent « inconnus » tant qu'un mécanisme fiable n'est pas défini : une activité récente n'est pas une preuve de bon fonctionnement.
 
-Notifications push/arrière-plan, boutons de clavier de réponse, rapports PDF/graphiques, multi-comptes, iOS.
+## Hors périmètre (à décider)
+
+Rapports PDF/graphiques, multi-comptes, iOS, démarrage automatique au redémarrage du téléphone.
 
 ## Développement local
 
@@ -46,4 +50,3 @@ app/src/main/kotlin/com/botdesk/app/
   td/     Telegram (unique point d'accès à TDLib), Msg
   ui/     écrans Compose
 ```
-"# BotDesk" 
