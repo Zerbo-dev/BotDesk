@@ -134,6 +134,26 @@ fun SettingsScreen(activity: FragmentActivity) {
             ChipRow(listOf("system" to "Système", "dark" to "Sombre", "light" to "Clair"), cfg.theme) { v -> app.store.update { it.copy(theme = v) } }
         }
 
+        item { SectionTitle("Voix") }
+        item {
+            Text("Langue de dictée et de lecture", style = MaterialTheme.typography.bodyMedium)
+            ChipRow(listOf("auto" to "Auto", "fr" to "Français", "en" to "English"), cfg.voiceLang) { v -> app.store.update { it.copy(voiceLang = v) } }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                Text("Envoyer automatiquement après la dictée", Modifier.weight(1f))
+                Switch(cfg.voiceAutoSend, { on -> app.store.update { it.copy(voiceAutoSend = on) } })
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Lire à voix haute les nouvelles réponses (conversation ouverte)", Modifier.weight(1f))
+                Switch(cfg.voiceAutoRead, { on -> app.store.update { it.copy(voiceAutoRead = on) } })
+            }
+            Text(
+                "La dictée utilise la reconnaissance vocale de votre téléphone (selon le fabricant, l'audio peut être traité par le service vocal de Google). " +
+                    "La lecture utilise la synthèse vocale du téléphone ; si la voix de votre langue manque, installez-la dans les réglages Android (Synthèse vocale). " +
+                    "Une commande sensible dictée demande toujours confirmation avant l'envoi.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
         item { SectionTitle("Notifications") }
         item {
             Text("Messages des bots", style = MaterialTheme.typography.bodyMedium)

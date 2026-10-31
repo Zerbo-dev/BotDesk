@@ -49,7 +49,7 @@ class Notifier(
         val body = if (lock.isPinSet) "Nouveau message" else text.take(160)
 
         if (tg.isBotChat(chat)) {
-            if (cfg.bots[m.chatId]?.muted == true) return
+            if (cfg.bots[m.chatId]?.muted == true || cfg.bots[m.chatId]?.hidden == true) return
             val alert = containsAny(text, cfg.alertKeywords)
             when (cfg.notifyBots) {
                 "off" -> return

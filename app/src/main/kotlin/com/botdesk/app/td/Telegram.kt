@@ -211,6 +211,12 @@ class Telegram(
 
     // ---------- messages ----------
 
+    suspend fun openChat(chatId: Long) { request(TdApi.OpenChat(chatId)) }
+
+    fun closeChat(chatId: Long) {
+        scope.launch { try { request(TdApi.CloseChat(chatId)) } catch (e: Exception) { } }
+    }
+
     suspend fun history(chatId: Long, fromId: Long, limit: Int = 50): List<TdApi.Message> {
         for (attempt in 0 until 3) {
             val r = request(TdApi.GetChatHistory(chatId, fromId, 0, limit, false))

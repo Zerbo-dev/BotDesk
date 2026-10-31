@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
@@ -25,7 +24,6 @@ import com.botdesk.app.td.AuthUi
 enum class Tab(val label: String, val icon: ImageVector) {
     Home("Accueil", Icons.Default.Home),
     Bots("Bots", Icons.Default.Face),
-    Messages("Messages", Icons.Default.Email),
     Backups("Sauvegardes", Icons.Default.DateRange),
     Alerts("Alertes", Icons.Default.Warning),
     Settings("Réglages", Icons.Default.Settings),
@@ -71,6 +69,8 @@ private fun Shell(activity: FragmentActivity) {
     BackHandler(enabled = chatId != null || channelId != null || showHistory) {
         chatId = null; channelId = null; showHistory = false
     }
+    val viewer by app.viewer.collectAsState()
+    BackHandler(enabled = viewer != null) { app.viewer.value = null }
 
     val openSource: (Long) -> Unit = { id ->
         val chat = app.tg.chat(id)
@@ -80,10 +80,13 @@ private fun Shell(activity: FragmentActivity) {
 
     val c = chatId
     val ch = channelId
-    if (c != null) {
-        ChatScreen(c) { chatId = null }
+    val v = viewer
+    if (v != null) {
+        ViewerScreen(v) { app.viewer.value = null }
+    } else if (c != null) {
+        ChatScreen(c, onBack = { chatId = null })
     } else if (ch != null) {
-        BackupFilesScreen(ch) { channelId = null }
+        ChannelHost(ch) { channelId = null }
     } else if (showHistory) {
         HistoryScreen(onOpen = openSource) { showHistory = false }
     } else {
@@ -106,7 +109,6 @@ private fun Shell(activity: FragmentActivity) {
                 when (tab) {
                     Tab.Home -> HomeScreen({ chatId = it }, { channelId = it }) { tab = it }
                     Tab.Bots -> BotsScreen { chatId = it }
-                    Tab.Messages -> MessagesScreen { chatId = it }
                     Tab.Backups -> BackupsScreen({ channelId = it }) { showHistory = true }
                     Tab.Alerts -> AlertsScreen { chatId = it }
                     Tab.Settings -> SettingsScreen(activity)
@@ -114,4 +116,14 @@ private fun Shell(activity: FragmentActivity) {
             }
         }
     }
+}
+
+/** Un canal s'ouvre sur ses messages (lecture seule) ; le bouton « Fichiers » bascule vers la liste des fichiers. */
+@Composable
+private fun ChannelHost(id: Long, onBack: () -> Unit) {
+    val app = LocalApp.current
+    var files by remember(id) { mutableStateOf(false) }
+    val isChannel = app.tg.chat(id)?.let { app.tg.channelKind(it) == "Canal" } ?: true
+    if (files) BackupFilesScreen(id, onBack = { files = false }, onMessages = { files = false })
+    else ChatScreen(id, onBack = onBack, readOnly = isChannel, onFiles = { files = true })
 }

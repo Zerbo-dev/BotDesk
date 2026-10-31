@@ -30,7 +30,7 @@ fun AlertsScreen(onOpenChat: (Long) -> Unit) {
         loading = true
         scope.launch {
             val out = mutableListOf<Event>()
-            val sources = tg.bots().take(20) + cfg.backupChannels.mapNotNull { tg.chat(it) }
+            val sources = tg.visibleBots(cfg).take(20) + cfg.backupChannels.mapNotNull { tg.chat(it) }
             for (c in sources) {
                 try {
                     for (m in tg.history(c.id, 0, 30)) {

@@ -27,7 +27,7 @@ fun HomeScreen(onOpenChat: (Long) -> Unit, onOpenChannel: (Long) -> Unit, onNavi
     val cfg by app.store.config.collectAsState()
     val name by tg.myName.collectAsState()
 
-    val bots = remember(tick) { tg.bots() }
+    val bots = remember(tick, cfg) { tg.visibleBots(cfg) }
     val favorites = remember(tick, cfg) { bots.filter { cfg.bots[it.id]?.favorite == true } }
     val recent = remember(tick) { bots.take(5) }
 
@@ -86,7 +86,7 @@ fun HomeScreen(onOpenChat: (Long) -> Unit, onOpenChannel: (Long) -> Unit, onNavi
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 NavCard("Mes bots", "${bots.size} détecté(s)", Modifier.weight(1f)) { onNavigate(Tab.Bots) }
-                NavCard("Discussions", "Voir mes conversations", Modifier.weight(1f)) { onNavigate(Tab.Messages) }
+                NavCard("Alertes", "Alertes et rapports", Modifier.weight(1f)) { onNavigate(Tab.Alerts) }
             }
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

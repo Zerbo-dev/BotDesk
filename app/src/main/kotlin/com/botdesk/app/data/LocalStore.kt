@@ -17,6 +17,7 @@ data class BotMeta(
     val displayName: String? = null,
     val description: String? = null,
     val muted: Boolean = false,
+    val hidden: Boolean = false,
     val pinnedCommands: List<String> = emptyList(),
 )
 
@@ -36,6 +37,10 @@ data class AppConfig(
     val confirmDownloadMb: Int = 100,
     /** Durée de conservation de l'historique des fichiers (jours). 0 = illimitée (plafonnée). */
     val indexRetentionDays: Int = 90,
+    /** Langue de dictée et de lecture : "auto" | "fr" | "en". */
+    val voiceLang: String = "auto",
+    val voiceAutoSend: Boolean = false,
+    val voiceAutoRead: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("app", "botdesk")
@@ -48,6 +53,7 @@ data class AppConfig(
                 o.put(id.toString(), JSONObject().apply {
                     put("favorite", m.favorite)
                     put("muted", m.muted)
+                    put("hidden", m.hidden)
                     put("pinnedCommands", JSONArray().also { a -> m.pinnedCommands.forEach { a.put(it) } })
                     m.categoryId?.let { put("categoryId", it) }
                     m.displayName?.let { put("displayName", it) }
@@ -64,6 +70,9 @@ data class AppConfig(
         put("theme", theme)
         put("confirmDownloadMb", confirmDownloadMb)
         put("indexRetentionDays", indexRetentionDays)
+        put("voiceLang", voiceLang)
+        put("voiceAutoSend", voiceAutoSend)
+        put("voiceAutoRead", voiceAutoRead)
     }
 
     companion object {
@@ -88,6 +97,7 @@ data class AppConfig(
                         displayName = m.str("displayName"),
                         description = m.str("description"),
                         muted = m.optBoolean("muted", false),
+                        hidden = m.optBoolean("hidden", false),
                         pinnedCommands = m.optJSONArray("pinnedCommands")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
                     )
                 }
@@ -106,6 +116,9 @@ data class AppConfig(
                 theme = o.str("theme") ?: "dark",
                 confirmDownloadMb = o.optInt("confirmDownloadMb", 100),
                 indexRetentionDays = o.optInt("indexRetentionDays", 90),
+                voiceLang = o.str("voiceLang") ?: "auto",
+                voiceAutoSend = o.optBoolean("voiceAutoSend", false),
+                voiceAutoRead = o.optBoolean("voiceAutoRead", false),
             )
         }
     }

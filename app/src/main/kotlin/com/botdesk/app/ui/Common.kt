@@ -11,6 +11,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.botdesk.app.AppContainer
+import com.botdesk.app.data.AppConfig
+import com.botdesk.app.td.Telegram
+import org.drinkless.tdlib.TdApi
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -69,3 +72,6 @@ fun SectionTitle(text: String) {
 fun ErrorText(text: String?) {
     if (text != null) Text(text, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 4.dp))
 }
+
+/** Bots non masqués (les bots masqués restent accessibles depuis le filtre « Masqués » de l'onglet Bots). */
+fun Telegram.visibleBots(cfg: AppConfig): List<TdApi.Chat> = bots().filter { cfg.bots[it.id]?.hidden != true }

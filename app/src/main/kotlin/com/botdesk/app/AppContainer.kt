@@ -6,6 +6,7 @@ import com.botdesk.app.core.SecureStore
 import com.botdesk.app.data.FileIndex
 import com.botdesk.app.data.LocalStore
 import com.botdesk.app.td.Telegram
+import com.botdesk.app.ui.ViewerRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,6 +25,9 @@ class AppContainer(val app: Application) {
 
     /** Conversation à ouvrir (clic sur une notification). */
     val pendingChat = MutableStateFlow<Long?>(null)
+
+    /** Fichier ouvert dans un lecteur interne (null = aucun). */
+    val viewer = MutableStateFlow<ViewerRequest?>(null)
 
     init {
         scope.launch {

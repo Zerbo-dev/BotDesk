@@ -2,7 +2,12 @@
 
 package com.botdesk.app.ui
 
+import android.app.Activity
 import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import java.util.Locale
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -32,7 +37,7 @@ import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 
 @Composable
-fun ChatScreen(chatId: Long, onBack: () -> Unit) {
+fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFiles: (() -> Unit)? = null) {
     val app = LocalApp.current
     val tg = app.tg
     val ctx = LocalContext.current
@@ -40,6 +45,7 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit) {
     val cfg by app.store.config.collectAsState()
     val chat = tg.chat(chatId)
     val save = rememberFileSaver()
+    val speakingId by Speaker.speakingId.collectAsState()
 
     var msgs by remember(chatId) { mutableStateOf(listOf<TdApi.Message>()) }
     var loading by remember(chatId) { mutableStateOf(false) }
@@ -67,7 +73,13 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit) {
         }
     }
 
-    LaunchedEffect(chatId) { loadMore() }
+    LaunchedEffect(chatId) {
+        try { tg.openChat(chatId) } catch (e: Exception) { /* lecture possible sans */ }
+        loadMore()
+    }
+    DisposableEffect(chatId) {
+        onDispose { tg.closeChat(chatId); AudioController.stop(); Speaker.stop() }
+    }
     LaunchedEffect(chatId) {
         val uid = tg.chat(chatId)?.let { tg.botUserId(it) }
         commands = if (uid == null) emptyList() else try { tg.botCommands(uid) } catch (e: Exception) { emptyList() }
@@ -77,7 +89,13 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit) {
         tg.msgEvents.collect { e ->
             when (e) {
                 is TdApi.UpdateNewMessage ->
-                    if (e.message.chatId == chatId) msgs = listOf(e.message) + msgs.filter { it.id != e.message.id }
+                    if (e.message.chatId == chatId) {
+                        msgs = listOf(e.message) + msgs.filter { it.id != e.message.id }
+                        val vc = app.store.config.value
+                        if (vc.voiceAutoRead && !e.message.isOutgoing && e.message.content is TdApi.MessageText) {
+                            Speaker.speak(ctx, Msg.text(e.message), e.message.id, vc.voiceLang)
+                        }
+                    }
                 is TdApi.UpdateMessageContent ->
                     if (e.chatId == chatId) {
                         msgs.firstOrNull { it.id == e.messageId }?.content = e.newContent
@@ -116,6 +134,34 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit) {
         if (containsAny(text, cfg.sensitiveKeywords)) confirm = text to { doSend(text) } else doSend(text)
     }
 
+    val dictation = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        if (r.resultCode == Activity.RESULT_OK) {
+            val said = r.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (!said.isNullOrBlank()) {
+                if (app.store.config.value.voiceAutoSend) trySend(said) else input = (input + " " + said).trim()
+            }
+        }
+    }
+
+    fun startDictation() {
+        val lang = when (app.store.config.value.voiceLang) {
+            "fr" -> "fr-FR"
+            "en" -> "en-US"
+            else -> Locale.getDefault().toLanguageTag()
+        }
+        val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
+            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Parlez…")
+        app.lock.skipNextLock = true
+        try {
+            dictation.launch(i)
+        } catch (e: Exception) {
+            app.lock.skipNextLock = false
+            toast(ctx, "Reconnaissance vocale indisponible sur ce téléphone")
+        }
+    }
+
     fun onInline(m: TdApi.Message, b: TdApi.InlineKeyboardButton) {
         val run = {
             when (val t = b.type) {
@@ -145,14 +191,25 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit) {
         TopAppBar(
             title = { Column { Text(cfg.bots[chatId]?.displayName ?: chat?.title ?: "Chat"); Text(activityLabel(chat?.lastMessage?.date ?: 0), style = MaterialTheme.typography.bodySmall) } },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") } },
+            actions = { onFiles?.let { f -> TextButton(onClick = f) { Text("Fichiers") } } },
         )
 
         ErrorText(error)
         LazyColumn(Modifier.weight(1f).padding(horizontal = 8.dp), state = listState, reverseLayout = true) {
-            items(msgs, key = { it.id }) { m -> Bubble(m, { d -> save(BackupFile(m.id, chatId, m.date, d, "", "")) }) { b -> onInline(m, b) } }
+            items(msgs, key = { it.id }) { m -> Bubble(
+                m,
+                speaking = speakingId == m.id,
+                onSpeak = {
+                    if (speakingId == m.id) Speaker.stop()
+                    else Speaker.speak(ctx, Msg.caption(m) ?: Msg.text(m), m.id, cfg.voiceLang)
+                },
+                onSave = { d -> save(BackupFile(m.id, chatId, m.date, d, "", "")) },
+                onInline = { b -> onInline(m, b) },
+            ) } 
             if (loading) item { Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(20.dp)) } }
         }
 
+        if (!readOnly) {
         val kb = msgs.firstOrNull { !it.isOutgoing && it.replyMarkup != null }?.replyMarkup as? TdApi.ReplyMarkupShowKeyboard
         kb?.rows?.forEach { row ->
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -178,9 +235,11 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit) {
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { showCommands = true }) { Text("/", style = MaterialTheme.typography.titleLarge, color = Accent) }
             OutlinedTextField(input, { input = it }, placeholder = { Text("Message ou /commande") }, modifier = Modifier.weight(1f), maxLines = 4)
+            IconButton(onClick = { startDictation() }) { Text("🎤", style = MaterialTheme.typography.titleLarge) }
             IconButton(onClick = { trySend(input); input = "" }, enabled = input.isNotBlank()) {
                 Icon(Icons.AutoMirrored.Filled.Send, "Envoyer", tint = Accent)
             }
+        }
         }
     }
 
@@ -243,7 +302,13 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit) {
 }
 
 @Composable
-private fun Bubble(m: TdApi.Message, onSave: (TdApi.Document) -> Unit, onInline: (TdApi.InlineKeyboardButton) -> Unit) {
+private fun Bubble(
+    m: TdApi.Message,
+    speaking: Boolean,
+    onSpeak: () -> Unit,
+    onSave: (TdApi.Document) -> Unit,
+    onInline: (TdApi.InlineKeyboardButton) -> Unit,
+) {
     val out = m.isOutgoing
     val failed = m.sendingState is TdApi.MessageSendingStateFailed
     val pending = m.sendingState is TdApi.MessageSendingStatePending
@@ -253,9 +318,18 @@ private fun Bubble(m: TdApi.Message, onSave: (TdApi.Document) -> Unit, onInline:
                 .background(if (out) Accent else MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
                 .padding(10.dp)
         ) {
-            Text(Msg.text(m), color = if (out) Color.White else MaterialTheme.colorScheme.onSurface)
-            Msg.document(m)?.let { d ->
-                TextButton(onClick = { onSave(d) }) { Text("Enregistrer · " + fmtSize(d.document.size)) }
+            when (val c = m.content) {
+                is TdApi.MessagePhoto -> PhotoView(c.photo)
+                is TdApi.MessageAudio -> AudioRow(c.audio.audio, c.audio.title.ifBlank { c.audio.fileName }.ifBlank { "Audio" }, c.audio.duration)
+                is TdApi.MessageVoiceNote -> AudioRow(c.voiceNote.voice, "Message vocal", c.voiceNote.duration)
+                is TdApi.MessageVideo -> VideoRow(c.video)
+                is TdApi.MessageDocument -> DocumentRow(c.document) { onSave(c.document) }
+                else -> Unit
+            }
+            val body = Msg.caption(m) ?: Msg.text(m)
+            if (body.isNotBlank()) Text(body, color = if (out) Color.White else MaterialTheme.colorScheme.onSurface)
+            if (!out && body.isNotBlank() && m.content is TdApi.MessageText) {
+                TextButton(onClick = onSpeak, contentPadding = PaddingValues(horizontal = 4.dp)) { Text(if (speaking) "⏹ Arrêter" else "🔊 Écouter") }
             }
             Text(
                 fmtDate(m.date) + if (failed) " · ⚠ échec" else if (pending) " · ⏳" else "",

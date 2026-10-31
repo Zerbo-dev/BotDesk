@@ -21,8 +21,11 @@ APK signé (optionnel) : ajoutez les secrets `KEYSTORE_BASE64`, `KEYSTORE_PASSWO
 ## Fonctions
 
 - **Accueil :** salutation, envoi rapide d'une commande à un bot (confirmation si action sensible), accès rapide aux sections, favoris, activité récente, dernières sauvegardes.
-- **Bots :** détection (conversations privées avec un bot), favoris, catégories, noms/descriptions locaux, sourdine par bot.
-- **Messages :** conversations par date, recherche dans l'historique des bots et des dépôts.
+- **Bots :** détection (conversations privées avec un bot), favoris, catégories, noms/descriptions locaux, sourdine par bot, masquage (un bot masqué disparaît des listes, de l'accueil, des alertes et des notifications ; filtre « Masqués » pour le retrouver).
+- **Lecteurs internes (aucune autre app nécessaire) :** images (zoom pincement, double-toucher), vidéo et audio (Media3/ExoPlayer, barre de lecture), PDF (pages, toucher pour zoomer), texte/logs/JSON/CSV/SQL (filtre de lignes, JSON indenté), `.gz` texte décompressé à la volée, archives ZIP (liste du contenu + aperçu des fichiers texte). Les messages vocaux et les audios se lisent directement dans la conversation. Les formats sans lecteur proposent « Autre app ». Enregistrement toujours possible, sans modification du fichier.
+- **Canaux :** un dépôt s'ouvre sur ses messages (lecture seule) ; le bouton « Fichiers » bascule vers la liste des fichiers, et « Messages » revient.
+- **Recherche d'historique :** dans l'onglet Bots, taper un terme puis « Chercher dans tout l'historique » (messages des bots et des dépôts).
+- **Voix :** bouton 🎤 pour dicter un message (reconnaissance vocale du téléphone, envoi automatique optionnel), bouton « 🔊 Écouter » sur les réponses des bots, lecture automatique optionnelle.
 - **Chat :** messages ; bouton « / » qui ouvre la liste des commandes du bot (filtre, insertion, envoi direct, épinglage) ; raccourcis épinglés au-dessus du clavier ; suggestions automatiques quand on tape « / » ; boutons inline, claviers de réponse, réception de fichiers.
 - **Sauvegardes :** l'écran n'affiche que les dépôts choisis (sélecteur via « Gérer les dépôts »), parcours (500 derniers messages), recherche par nom/légende/expéditeur, filtre par format, téléchargement tel quel vers l'emplacement de votre choix, aperçu texte, détection de format par signature, confirmation des gros fichiers, historique local des fichiers consultés (hors connexion).
 - **Alertes :** messages classés par mots-clés configurables.

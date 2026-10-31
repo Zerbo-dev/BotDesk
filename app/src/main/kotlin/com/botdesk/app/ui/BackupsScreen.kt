@@ -117,11 +117,12 @@ private fun toggleDepot(app: com.botdesk.app.AppContainer, id: Long, on: Boolean
 }
 
 @Composable
-fun BackupFilesScreen(chatId: Long, onBack: () -> Unit) {
+fun BackupFilesScreen(chatId: Long, onBack: () -> Unit, onMessages: (() -> Unit)? = null) {
     val app = LocalApp.current
     val tg = app.tg
     val scope = rememberCoroutineScope()
     val save = rememberFileSaver()
+    val open = rememberFileOpener()
     val ctx = LocalContext.current
     var files by remember(chatId) { mutableStateOf<List<BackupFile>?>(null) }
     var error by remember(chatId) { mutableStateOf<String?>(null) }
@@ -142,6 +143,7 @@ fun BackupFilesScreen(chatId: Long, onBack: () -> Unit) {
         TopAppBar(
             title = { Text(title) },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") } },
+            actions = { onMessages?.let { m -> TextButton(onClick = m) { Text("Messages") } } },
         )
         Column(Modifier.padding(horizontal = 16.dp)) {
             OutlinedTextField(query, { query = it }, label = { Text("Rechercher (nom, légende, expéditeur)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -170,7 +172,8 @@ fun BackupFilesScreen(chatId: Long, onBack: () -> Unit) {
                             if (f.sender.isNotBlank()) Text("Expéditeur : " + f.sender, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             if (f.caption.isNotBlank()) Text(f.caption, style = MaterialTheme.typography.bodySmall, maxLines = 3)
                             Row {
-                                TextButton(onClick = { save(f) }) { Text("Télécharger") }
+                                TextButton(onClick = { open(f.doc.document, f.doc.mimeType.ifBlank { "*/*" }, f.doc.fileName) }) { Text("Lire / ouvrir") }
+                                TextButton(onClick = { save(f) }) { Text("Enregistrer") }
                                 TextButton(onClick = {
                                     val h = PreviewRegistry.find(f.doc.fileName, f.doc.mimeType, f.doc.document.size)
                                     if (h == null) {
