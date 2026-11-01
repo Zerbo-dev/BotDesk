@@ -30,6 +30,7 @@ class AppContainer(val app: Application) {
     val viewer = MutableStateFlow<ViewerRequest?>(null)
 
     init {
+        com.botdesk.app.ui.Speaker.bind(store, secure)
         scope.launch {
             tg.msgEvents.collect { e ->
                 if (e is TdApi.UpdateNewMessage) notifier.onMessage(e.message)

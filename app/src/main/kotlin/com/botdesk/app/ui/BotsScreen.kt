@@ -2,11 +2,17 @@
 
 package com.botdesk.app.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
@@ -37,6 +43,15 @@ fun BotsScreen(onOpenChat: (Long) -> Unit) {
     var refreshing by remember { mutableStateOf(false) }
     var hits by remember { mutableStateOf<List<Hit>?>(null) }
     var searching by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        val id = editing
+        if (uri != null && id != null) scope.launch {
+            val ok = withContext(Dispatchers.IO) { AvatarStore.save(ctx, id, uri) }
+            if (ok) app.store.update { c -> val m = c.bots[id] ?: BotMeta(); c.copy(bots = c.bots + (id to m.copy(avatarVersion = m.avatarVersion + 1))) }
+            else toast(ctx, "Image illisible")
+        }
+    }
 
     fun searchHistory() {
         val q = query.trim()
@@ -73,14 +88,13 @@ fun BotsScreen(onOpenChat: (Long) -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 16.dp)) {
-            Text("Mes bots", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+        ScreenHeader("Mes bots", "${bots.size} affiché(s)") {
             IconButton(onClick = {
                 scope.launch { refreshing = true; try { tg.loadChats() } catch (e: Exception) { }; refreshing = false }
             }) { if (refreshing) CircularProgressIndicator(Modifier.size(20.dp)) else Icon(Icons.Default.Refresh, "Actualiser") }
         }
         OutlinedTextField(
-            query, { query = it; hits = null }, label = { Text("Rechercher un bot") }, singleLine = true,
+            query, { query = it; hits = null }, label = { Text("Rechercher un bot") }, singleLine = true, shape = RoundedCornerShape(16.dp),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { searchHistory() }),
             modifier = Modifier.fillMaxWidth(),
@@ -105,32 +119,33 @@ fun BotsScreen(onOpenChat: (Long) -> Unit) {
                     )
                 }
                 items(h, key = { it.chatId.toString() + "_" + it.id }) { r ->
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onOpenChat(r.chatId) },
-                    ) {
-                        Column(Modifier.padding(12.dp)) {
+                    AppCard(Modifier.fillMaxWidth().padding(vertical = 4.dp), onClick = { onOpenChat(r.chatId) }, padding = 12.dp) {
+                        Column {
                             Text(r.source + " · " + fmtDate(r.date), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(r.text.take(250))
                         }
                     }
                 }
             }
-            if (h == null && bots.isEmpty()) item { Text("Aucun bot à afficher.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            if (h == null && bots.isEmpty()) item { EmptyState("🤖", "Aucun bot à afficher", "Écrivez à un bot depuis Telegram, puis actualisez avec le bouton en haut.") }
             items(if (h == null) bots else emptyList(), key = { it.id }) { c ->
                 val meta = cfg.bots[c.id] ?: BotMeta()
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onOpenChat(c.id) },
-                ) {
-                    Row(Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                val shownName = meta.displayName ?: c.title
+                AppCard(Modifier.fillMaxWidth().padding(vertical = 4.dp), onClick = { onOpenChat(c.id) }, padding = 12.dp) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        BotAvatar(c.id, shownName)
+                        Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(meta.displayName ?: c.title, style = MaterialTheme.typography.titleSmall)
-                            meta.description?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(shownName, style = MaterialTheme.typography.titleSmall, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                                Spacer(Modifier.width(6.dp))
+                                ActivityDot(c.lastMessage?.date ?: 0)
+                            }
+                            meta.description?.let { Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 1) }
+                            c.lastMessage?.let { Text(Msg.text(it).take(80), style = MaterialTheme.typography.bodySmall, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                             val cat = cfg.categories.firstOrNull { it.id == meta.categoryId }?.name
                             Text(listOfNotNull(cat, activityLabel(c.lastMessage?.date ?: 0)).joinToString(" · "),
-                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            c.lastMessage?.let { Text(Msg.text(it).take(80), style = MaterialTheme.typography.bodySmall, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         if (c.unreadCount > 0) Badge { Text(c.unreadCount.toString()) }
                         IconButton(onClick = { app.store.update { it.copy(bots = it.bots + (c.id to meta.copy(favorite = !meta.favorite))) } }) {
@@ -151,11 +166,26 @@ fun BotsScreen(onOpenChat: (Long) -> Unit) {
         var cat by remember(id) { mutableStateOf(meta.categoryId) }
         var muted by remember(id) { mutableStateOf(meta.muted) }
         var hidden by remember(id) { mutableStateOf(meta.hidden) }
+        var emoji by remember(id) { mutableStateOf(meta.avatarEmoji ?: "") }
         AlertDialog(
             onDismissRequest = { editing = null },
             title = { Text("Modifier le bot") },
             text = {
                 Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        BotAvatar(id, name.ifBlank { chat?.title ?: "?" }, 56.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            TextButton(onClick = { app.lock.skipNextLock = true; picker.launch("image/*") }) { Text("Choisir une image") }
+                            if (meta.avatarVersion > 0) {
+                                TextButton(onClick = {
+                                    AvatarStore.delete(ctx, id)
+                                    app.store.update { c -> val m = c.bots[id] ?: BotMeta(); c.copy(bots = c.bots + (id to m.copy(avatarVersion = 0))) }
+                                }) { Text("Retirer l'image") }
+                            }
+                        }
+                    }
+                    OutlinedTextField(emoji, { emoji = it.take(4) }, label = { Text("Ou un emoji (ex. 🎵)") }, singleLine = true)
                     OutlinedTextField(name, { name = it }, label = { Text(chat?.title ?: "Nom affiché") }, singleLine = true)
                     OutlinedTextField(desc, { desc = it }, label = { Text("Description") })
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
@@ -175,7 +205,7 @@ fun BotsScreen(onOpenChat: (Long) -> Unit) {
             confirmButton = {
                 TextButton(onClick = {
                     app.store.update {
-                        it.copy(bots = it.bots + (id to meta.copy(displayName = name.ifBlank { null }, description = desc.ifBlank { null }, categoryId = cat, muted = muted, hidden = hidden)))
+                        it.copy(bots = it.bots + (id to (it.bots[id] ?: BotMeta()).copy(displayName = name.ifBlank { null }, description = desc.ifBlank { null }, categoryId = cat, muted = muted, hidden = hidden, avatarEmoji = emoji.trim().ifBlank { null })))
                     }
                     editing = null
                 }) { Text("Enregistrer") }

@@ -97,8 +97,12 @@ class Telegram(
             is TdApi.UpdateChatReadInbox -> { chats[o.chatId]?.unreadCount = o.unreadCount; bump() }
             is TdApi.UpdateChatTitle -> { chats[o.chatId]?.title = o.title; bump() }
             is TdApi.UpdateUser -> { users[o.user.id] = o.user; bump() }
+            is TdApi.UpdateChatPhoto -> { chats[o.chatId]?.photo = o.photo; bump() }
             is TdApi.UpdateNewMessage,
             is TdApi.UpdateMessageContent,
+            is TdApi.UpdateMessageEdited,
+            is TdApi.UpdateDeleteMessages,
+            is TdApi.UpdateChatAction,
             is TdApi.UpdateMessageSendSucceeded,
             is TdApi.UpdateMessageSendFailed -> _events.tryEmit(o)
             else -> Unit
@@ -242,11 +246,9 @@ class Telegram(
         return info.commands?.filterNotNull()?.map { it.command to it.description } ?: emptyList()
     }
 
-    /** Appuie sur un bouton inline "callback". Retourne le texte de réponse éventuel. */
-    suspend fun pressInline(chatId: Long, messageId: Long, data: ByteArray): String? {
-        val ans = request(TdApi.GetCallbackQueryAnswer(chatId, messageId, TdApi.CallbackQueryPayloadData(data)))
-        return ans.text?.takeIf { it.isNotBlank() }
-    }
+    /** Appuie sur un bouton inline « callback ». Lève TdException(502) si le bot ne répond pas à temps (fréquent et sans gravité). */
+    suspend fun pressInline(chatId: Long, messageId: Long, data: ByteArray): TdApi.CallbackQueryAnswer =
+        request(TdApi.GetCallbackQueryAnswer(chatId, messageId, TdApi.CallbackQueryPayloadData(data)))
 
     // ---------- fichiers / sauvegardes ----------
 

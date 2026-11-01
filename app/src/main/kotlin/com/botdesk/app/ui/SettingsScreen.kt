@@ -8,6 +8,7 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.core.content.ContextCompat
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
@@ -31,6 +32,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.util.Locale
 import java.util.UUID
 
 private enum class Dlg { None, SetPin, ClearPin, Logout, Export, Import, NewCategory }
@@ -48,6 +50,9 @@ fun SettingsScreen(activity: FragmentActivity) {
     var exportPwd by remember { mutableStateOf<String?>(null) }
     var importBytes by remember { mutableStateOf<ByteArray?>(null) }
     var storageTick by remember { mutableStateOf(0) }
+    var voiceDialog by remember { mutableStateOf(false) }
+    val voices by Speaker.voices.collectAsState()
+    LaunchedEffect(Unit) { Speaker.prepare(ctx) }
     val indexed by app.index.items.collectAsState()
     val storage by produceState<Long?>(null, storageTick) { value = try { app.tg.storageBytes() } catch (e: Exception) { null } }
 
@@ -88,7 +93,7 @@ fun SettingsScreen(activity: FragmentActivity) {
         item { Text("Paramètres", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 16.dp)) }
 
         item { SectionTitle("Sécurité") }
-        item {
+        item { AppCard(Modifier.fillMaxWidth()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(if (pinSet) "PIN activé" else "PIN désactivé", Modifier.weight(1f))
                 TextButton(onClick = { dlg = Dlg.SetPin }) { Text(if (pinSet) "Changer" else "Définir") }
@@ -101,7 +106,7 @@ fun SettingsScreen(activity: FragmentActivity) {
                 }
             }
             Text("Le verrouillage s'applique dès que l'app passe en arrière-plan.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        } }
 
         item { SectionTitle("Catégories de bots") }
         items(cfg.categories.size) { i ->
@@ -120,22 +125,22 @@ fun SettingsScreen(activity: FragmentActivity) {
         item { TextButton(onClick = { dlg = Dlg.NewCategory }) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(4.dp)); Text("Nouvelle catégorie") } }
 
         item { SectionTitle("Alertes et actions sensibles") }
-        item {
+        item { AppCard(Modifier.fillMaxWidth()) {
             var alerts by remember(cfg.alertKeywords) { mutableStateOf(cfg.alertKeywords) }
             var sens by remember(cfg.sensitiveKeywords) { mutableStateOf(cfg.sensitiveKeywords) }
             OutlinedTextField(alerts, { alerts = it }, label = { Text("Mots-clés d'alerte (séparés par des virgules)") }, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(sens, { sens = it }, label = { Text("Mots-clés d'actions à confirmer") }, modifier = Modifier.fillMaxWidth())
             TextButton(onClick = { app.store.update { it.copy(alertKeywords = alerts, sensitiveKeywords = sens) }; toast(ctx, "Enregistré") }) { Text("Enregistrer les mots-clés") }
-        }
+        } }
 
         item { SectionTitle("Apparence") }
-        item {
+        item { AppCard(Modifier.fillMaxWidth()) {
             ChipRow(listOf("system" to "Système", "dark" to "Sombre", "light" to "Clair"), cfg.theme) { v -> app.store.update { it.copy(theme = v) } }
-        }
+        } }
 
         item { SectionTitle("Voix") }
-        item {
+        item { AppCard(Modifier.fillMaxWidth()) {
             Text("Langue de dictée et de lecture", style = MaterialTheme.typography.bodyMedium)
             ChipRow(listOf("auto" to "Auto", "fr" to "Français", "en" to "English"), cfg.voiceLang) { v -> app.store.update { it.copy(voiceLang = v) } }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
@@ -146,16 +151,59 @@ fun SettingsScreen(activity: FragmentActivity) {
                 Text("Lire à voix haute les nouvelles réponses (conversation ouverte)", Modifier.weight(1f))
                 Switch(cfg.voiceAutoRead, { on -> app.store.update { it.copy(voiceAutoRead = on) } })
             }
+
+            Text("Voix de lecture", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
+            ChipRow(listOf("system" to "Voix du téléphone", "eleven" to "ElevenLabs"), cfg.ttsEngine) { v -> app.store.update { it.copy(ttsEngine = v) } }
+
+            var rate by remember(cfg.ttsRate) { mutableStateOf(cfg.ttsRate) }
+            Text("Vitesse : " + String.format("%.1f×", rate), modifier = Modifier.padding(top = 8.dp))
+            Slider(rate, { rate = it }, valueRange = 0.5f..2f, onValueChangeFinished = { app.store.update { it.copy(ttsRate = rate) } })
+
+            if (cfg.ttsEngine == "system") {
+                var pitch by remember(cfg.ttsPitch) { mutableStateOf(cfg.ttsPitch) }
+                Text("Hauteur : " + String.format("%.1f", pitch))
+                Slider(pitch, { pitch = it }, valueRange = 0.5f..1.5f, onValueChangeFinished = { app.store.update { it.copy(ttsPitch = pitch) } })
+                OutlinedButton(onClick = { voiceDialog = true }) { Text("Voix : " + cfg.ttsVoice.ifBlank { "automatique" }, maxLines = 1) }
+                Text(
+                    "Pour de meilleures voix : Réglages Android > Synthèse vocale > moteur Google > installer les voix de haute qualité de votre langue, puis les choisir ici.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                var key by remember { mutableStateOf("") }
+                var hasKey by remember { mutableStateOf(app.secure.getString("eleven_key") != null) }
+                var vid by remember(cfg.elevenVoiceId) { mutableStateOf(cfg.elevenVoiceId) }
+                OutlinedTextField(
+                    key, { key = it }, singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                    label = { Text(if (hasKey) "Clé API (enregistrée — saisir pour remplacer)" else "Clé API ElevenLabs") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    vid, { vid = it.trim() }, singleLine = true, label = { Text("Identifiant de la voix (Voice ID)") },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+                TextButton(onClick = {
+                    if (key.isNotBlank()) { app.secure.putString("eleven_key", key.trim()); hasKey = true; key = "" }
+                    app.store.update { it.copy(elevenVoiceId = vid) }
+                    toast(ctx, "Enregistré")
+                }) { Text("Enregistrer") }
+                Text(
+                    "Le texte des messages lus est envoyé à ElevenLabs (compte et quota à votre charge). La clé reste chiffrée sur ce téléphone et n'est jamais exportée. " +
+                        "Les audios générés sont gardés en cache pour ne pas être facturés deux fois.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            OutlinedButton(onClick = { Speaker.speak(ctx, "Bonjour, ceci est un test de la voix de BotDesk.", -1L, cfg.voiceLang) }, modifier = Modifier.padding(top = 8.dp)) {
+                Text("🔊 Tester la voix")
+            }
             Text(
-                "La dictée utilise la reconnaissance vocale de votre téléphone (selon le fabricant, l'audio peut être traité par le service vocal de Google). " +
-                    "La lecture utilise la synthèse vocale du téléphone ; si la voix de votre langue manque, installez-la dans les réglages Android (Synthèse vocale). " +
+                "La dictée utilise la reconnaissance vocale du téléphone (selon le fabricant, l'audio peut être traité par le service vocal de Google). " +
                     "Une commande sensible dictée demande toujours confirmation avant l'envoi.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp),
             )
-        }
+        } }
 
         item { SectionTitle("Notifications") }
-        item {
+        item { AppCard(Modifier.fillMaxWidth()) {
             Text("Messages des bots", style = MaterialTheme.typography.bodyMedium)
             ChipRow(listOf("off" to "Aucune", "alerts" to "Alertes", "all" to "Tous"), cfg.notifyBots) { v ->
                 app.store.update { it.copy(notifyBots = v) }
@@ -180,10 +228,10 @@ fun SettingsScreen(activity: FragmentActivity) {
                     "Le mode silencieux se règle bot par bot (onglet Bots, bouton Modifier).",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
+        } }
 
         item { SectionTitle("Stockage et téléchargements") }
-        item {
+        item { AppCard(Modifier.fillMaxWidth()) {
             Text("Cache de fichiers : " + (storage?.let { fmtSize(it) } ?: "—"))
             Text("Confirmer avant de télécharger un fichier de plus de :", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
             ChipRow(listOf("0" to "Jamais", "50" to "50 Mo", "100" to "100 Mo", "500" to "500 Mo"), cfg.confirmDownloadMb.toString()) { v ->
@@ -195,10 +243,10 @@ fun SettingsScreen(activity: FragmentActivity) {
                     storageTick++
                 }
             }) { Text("Vider le cache de téléchargement") }
-        }
+        } }
 
         item { SectionTitle("Historique des fichiers") }
-        item {
+        item { AppCard(Modifier.fillMaxWidth()) {
             Text("${indexed.size} fichier(s) indexé(s) (métadonnées uniquement)")
             Text("Conserver :", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
             ChipRow(listOf("30" to "30 jours", "90" to "90 jours", "365" to "1 an", "0" to "Illimité"), cfg.indexRetentionDays.toString()) { v ->
@@ -206,16 +254,16 @@ fun SettingsScreen(activity: FragmentActivity) {
                 app.index.applyRetention()
             }
             TextButton(onClick = { app.index.clear(); toast(ctx, "Historique vidé") }) { Text("Vider l'historique") }
-        }
+        } }
 
         item { SectionTitle("Configuration") }
-        item {
+        item { AppCard(Modifier.fillMaxWidth()) {
             Text("Catégories, favoris, noms, canaux de sauvegarde et mots-clés. Ni session Telegram, ni PIN, ni clés API.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row {
                 TextButton(onClick = { dlg = Dlg.Export }) { Text("Exporter (chiffré)") }
                 TextButton(onClick = { app.lock.skipNextLock = true; importLauncher.launch(arrayOf("*/*")) }) { Text("Importer") }
             }
-        }
+        } }
 
         item { SectionTitle("Compte") }
         item { OutlinedButton(onClick = { dlg = Dlg.Logout }) { Text("Se déconnecter de Telegram") } }
@@ -274,6 +322,37 @@ fun SettingsScreen(activity: FragmentActivity) {
             app.store.update { it.copy(categories = it.categories + Category(UUID.randomUUID().toString(), n)) }; dlg = Dlg.None
         }
         Dlg.None -> Unit
+    }
+    if (voiceDialog) {
+        val lang = when (cfg.voiceLang) { "fr" -> "fr"; "en" -> "en"; else -> Locale.getDefault().language }
+        val list = voices.filter { it.language == lang }
+        AlertDialog(
+            onDismissRequest = { voiceDialog = false },
+            title = { Text("Choisir la voix") },
+            text = {
+                LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                    item {
+                        TextButton(onClick = { app.store.update { it.copy(ttsVoice = "") }; voiceDialog = false }) { Text("Automatique (voix par défaut)") }
+                    }
+                    if (list.isEmpty()) item { Text("Aucune voix trouvée pour cette langue. Installez-en une dans les réglages Android (Synthèse vocale).", style = MaterialTheme.typography.bodySmall) }
+                    items(list.size) { i ->
+                        val v = list[i]
+                        val q = when { v.quality >= 400 -> "haute qualité"; v.quality >= 300 -> "standard"; else -> "basique" }
+                        Column(
+                            Modifier.fillMaxWidth().clickable {
+                                app.store.update { it.copy(ttsVoice = v.name) }
+                                voiceDialog = false
+                                Speaker.speak(ctx, "Bonjour, ceci est un test de cette voix.", -1L, cfg.voiceLang)
+                            }.padding(vertical = 8.dp),
+                        ) {
+                            Text(v.label, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
+                            Text(q + if (v.network) " · en ligne" else " · hors ligne", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { voiceDialog = false }) { Text("Fermer") } },
+        )
     }
     renaming?.let { c ->
         NameDialog("Renommer la catégorie", c.name, { renaming = null }) { n ->

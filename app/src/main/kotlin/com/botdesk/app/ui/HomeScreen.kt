@@ -2,16 +2,26 @@
 
 package com.botdesk.app.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.botdesk.app.td.BackupFile
 import com.botdesk.app.td.Msg
@@ -60,54 +70,74 @@ fun HomeScreen(onOpenChat: (Long) -> Unit, onOpenChannel: (Long) -> Unit, onNavi
 
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
-            Text("Bonjour" + (name?.let { " $it" } ?: "") + " 👋", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 16.dp))
-            Text("Que veux-tu faire aujourd'hui ?", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(12.dp))
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp)) {
-                    Box {
-                        TextButton(onClick = { menu = true }, enabled = bots.isNotEmpty()) { Text("À : $targetName ▾") }
-                        DropdownMenu(menu, { menu = false }) {
-                            bots.forEach { c ->
-                                DropdownMenuItem(text = { Text(cfg.bots[c.id]?.displayName ?: c.title) }, onClick = { target = c.id; menu = false })
-                            }
-                        }
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(quick, { quick = it }, placeholder = { Text("Ex. : /status, vérifie mes logs…") }, modifier = Modifier.weight(1f), maxLines = 2)
-                        IconButton(onClick = {
-                            if (quick.isNotBlank()) { if (containsAny(quick, cfg.sensitiveKeywords)) confirm = quick else send(quick) }
-                        }, enabled = quick.isNotBlank() && targetId != null) {
-                            Icon(Icons.AutoMirrored.Filled.Send, "Envoyer", tint = Accent)
+            Row(Modifier.padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Avatar(name ?: "B", 48.dp)
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text("Bonjour" + (name?.let { " $it" } ?: "") + " 👋", style = MaterialTheme.typography.headlineSmall)
+                    Text("Que veux-tu faire aujourd'hui ?", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+
+            AppCard(Modifier.fillMaxWidth()) {
+                Box {
+                    TextButton(onClick = { menu = true }, enabled = bots.isNotEmpty()) { Text("À : $targetName ▾") }
+                    DropdownMenu(menu, { menu = false }) {
+                        bots.forEach { c ->
+                            DropdownMenuItem(text = { Text(cfg.bots[c.id]?.displayName ?: c.title) }, onClick = { target = c.id; menu = false })
                         }
                     }
                 }
+                Row(verticalAlignment = Alignment.Bottom) {
+                    OutlinedTextField(
+                        quick, { quick = it }, placeholder = { Text("Ex. : /status, vérifie mes logs…") },
+                        shape = RoundedCornerShape(24.dp), modifier = Modifier.weight(1f), maxLines = 2,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        Modifier.size(48.dp).clip(CircleShape).background(if (quick.isNotBlank() && targetId != null) Accent else MaterialTheme.colorScheme.surfaceVariant)
+                            .clickable(enabled = quick.isNotBlank() && targetId != null) {
+                                if (containsAny(quick, cfg.sensitiveKeywords)) confirm = quick else send(quick)
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.AutoMirrored.Filled.Send, "Envoyer", tint = Color.White) }
+                }
             }
             Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                NavCard("Mes bots", "${bots.size} détecté(s)", Modifier.weight(1f)) { onNavigate(Tab.Bots) }
-                NavCard("Alertes", "Alertes et rapports", Modifier.weight(1f)) { onNavigate(Tab.Alerts) }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Tile(Icons.Default.Face, "Mes bots", "${bots.size} détecté(s)", Modifier.weight(1f)) { onNavigate(Tab.Bots) }
+                Tile(Icons.Default.DateRange, "Sauvegardes", "${cfg.backupChannels.size} dépôt(s)", Modifier.weight(1f)) { onNavigate(Tab.Backups) }
             }
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                NavCard("Sauvegardes", "${cfg.backupChannels.size} dépôt(s)", Modifier.weight(1f)) { onNavigate(Tab.Backups) }
-                NavCard("Paramètres", "Personnaliser l'app", Modifier.weight(1f)) { onNavigate(Tab.Settings) }
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Tile(Icons.Default.Warning, "Alertes", "Alertes et rapports", Modifier.weight(1f)) { onNavigate(Tab.Alerts) }
+                Tile(Icons.Default.Settings, "Réglages", "Personnaliser l'app", Modifier.weight(1f)) { onNavigate(Tab.Settings) }
             }
         }
         if (favorites.isNotEmpty()) {
-            item { SectionTitle("Favoris") }
-            items(favorites, key = { "f" + it.id }) { c -> BotRow(cfg.bots[c.id]?.displayName ?: c.title, activityLabel(c.lastMessage?.date ?: 0)) { onOpenChat(c.id) } }
+            item { SectionHeader("Favoris") }
+            items(favorites, key = { "f" + it.id }) { c -> BotRow(c.id, cfg.bots[c.id]?.displayName ?: c.title, activityLabel(c.lastMessage?.date ?: 0), c.lastMessage?.date ?: 0) { onOpenChat(c.id) } }
         }
-        item { SectionTitle("Activité récente") }
-        if (recent.isEmpty()) item { Text("Aucun bot trouvé. Écrivez à un bot depuis Telegram puis actualisez dans l'onglet Bots.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { SectionHeader("Activité récente", "Voir tout") { onNavigate(Tab.Bots) } }
+        if (recent.isEmpty()) item { EmptyState("🤖", "Aucun bot trouvé", "Écrivez à un bot depuis Telegram, puis actualisez dans l'onglet Bots.") }
         items(recent, key = { "r" + it.id }) { c ->
             val last = c.lastMessage
-            BotRow(cfg.bots[c.id]?.displayName ?: c.title, activityLabel(last?.date ?: 0) + (last?.let { " · " + Msg.text(it).take(50) } ?: "")) { onOpenChat(c.id) }
+            BotRow(c.id, cfg.bots[c.id]?.displayName ?: c.title, activityLabel(last?.date ?: 0) + (last?.let { " · " + Msg.text(it).take(50) } ?: ""), last?.date ?: 0) { onOpenChat(c.id) }
         }
-        item { SectionTitle("Dernières sauvegardes") }
-        if (cfg.backupChannels.isEmpty()) item { Text("Aucun canal de sauvegarde sélectionné (onglet Sauvegardes).", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { SectionHeader("Dernières sauvegardes", "Voir tout") { onNavigate(Tab.Backups) } }
+        if (cfg.backupChannels.isEmpty()) item { EmptyState("🗄", "Aucun dépôt choisi", "Choisissez vos canaux de sauvegarde dans l'onglet Sauvegardes.") }
         items(lastBackups, key = { "b" + it.second.chatId + "_" + it.second.msgId }) { (title, f) ->
-            BotRow(f.doc.fileName, "$title · ${fmtDate(f.date)} · ${fmtSize(f.doc.document.size)}") { onOpenChannel(f.chatId) }
+            AppCard(Modifier.fillMaxWidth().padding(vertical = 4.dp), onClick = { onOpenChannel(f.chatId) }, padding = 12.dp) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(f.doc.fileName, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                        Text("$title · ${fmtDate(f.date)} · ${fmtSize(f.doc.document.size)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    FormatBadge(FormatDetector.guess(f.doc.fileName, f.doc.mimeType))
+                }
+            }
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
@@ -124,27 +154,29 @@ fun HomeScreen(onOpenChat: (Long) -> Unit, onOpenChannel: (Long) -> Unit, onNavi
 }
 
 @Composable
-private fun NavCard(title: String, subtitle: String, modifier: Modifier, onClick: () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = modifier.clickable(onClick = onClick),
-    ) {
-        Column(Modifier.padding(12.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+private fun Tile(icon: ImageVector, title: String, subtitle: String, modifier: Modifier, onClick: () -> Unit) {
+    AppCard(modifier, onClick = onClick) {
+        Box(Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(Accent.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = Accent)
         }
+        Spacer(Modifier.height(10.dp))
+        Text(title, style = MaterialTheme.typography.titleSmall)
+        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
     }
 }
 
 @Composable
-fun BotRow(title: String, subtitle: String, onClick: () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable(onClick = onClick),
-    ) {
-        Column(Modifier.padding(12.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+fun BotRow(chatId: Long, title: String, subtitle: String, activitySec: Int, onClick: () -> Unit) {
+    AppCard(Modifier.fillMaxWidth().padding(vertical = 4.dp), onClick = onClick, padding = 12.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            BotAvatar(chatId, title, 40.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+            }
+            Spacer(Modifier.width(8.dp))
+            ActivityDot(activitySec)
         }
     }
 }

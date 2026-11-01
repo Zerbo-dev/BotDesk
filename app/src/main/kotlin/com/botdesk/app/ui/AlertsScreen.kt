@@ -49,23 +49,17 @@ fun AlertsScreen(onOpenChat: (Long) -> Unit) {
     val shown = events.filter { (!onlyAlerts || it.alert) && (query.isBlank() || it.text.contains(query, true) || it.source.contains(query, true)) }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 16.dp)) {
-            Text("Alertes et rapports", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
-            TextButton(onClick = { load() }) { Text(if (loading) "…" else "Actualiser") }
-        }
+        ScreenHeader("Alertes et rapports") { TextButton(onClick = { load() }) { Text(if (loading) "…" else "Actualiser") } }
         Text("Une alerte = message contenant un de vos mots-clés (Paramètres).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
             Switch(onlyAlerts, { onlyAlerts = it }); Spacer(Modifier.width(8.dp)); Text("Alertes seulement")
         }
         OutlinedTextField(query, { query = it }, label = { Text("Rechercher") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         LazyColumn(Modifier.weight(1f)) {
-            if (shown.isEmpty() && !loading) item { Text("Rien à afficher.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp)) }
+            if (shown.isEmpty() && !loading) item { EmptyState("🔔", "Rien à afficher", "Aucun message récent ne correspond à vos mots-clés d'alerte (Réglages).") }
             items(shown, key = { it.chatId.toString() + "_" + it.id }) { e ->
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = if (e.alert) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onOpenChat(e.chatId) },
-                ) {
-                    Column(Modifier.padding(12.dp)) {
+                AppCard(Modifier.fillMaxWidth().padding(vertical = 4.dp), onClick = { onOpenChat(e.chatId) }, padding = 0.dp) {
+                    Column(Modifier.padding(12.dp).then(if (e.alert) Modifier.padding(start = 0.dp) else Modifier)) {
                         Text((if (e.alert) "⚠ " else "") + e.source + " · " + fmtDate(e.date), style = MaterialTheme.typography.labelMedium, color = if (e.alert) Warn else MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(e.text.take(300), style = MaterialTheme.typography.bodyMedium)
                     }

@@ -10,6 +10,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import java.util.Locale
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -33,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import com.botdesk.app.data.BotMeta
 import com.botdesk.app.td.BackupFile
 import com.botdesk.app.td.Msg
+import com.botdesk.app.td.TdException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 
@@ -48,6 +52,10 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
     val speakingId by Speaker.speakingId.collectAsState()
 
     var msgs by remember(chatId) { mutableStateOf(listOf<TdApi.Message>()) }
+    var activity by remember(chatId) { mutableStateOf<String?>(null) }
+    var activityStamp by remember { mutableStateOf(0) }
+    var pendingPress by remember { mutableStateOf(0) }
+    var answer by remember { mutableStateOf<String?>(null) }
     var loading by remember(chatId) { mutableStateOf(false) }
     var endReached by remember(chatId) { mutableStateOf(false) }
     var input by remember { mutableStateOf("") }
@@ -73,6 +81,9 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
         }
     }
 
+    LaunchedEffect(activityStamp) {
+        if (activity != null) { delay(6000); activity = null }
+    }
     LaunchedEffect(chatId) {
         try { tg.openChat(chatId) } catch (e: Exception) { /* lecture possible sans */ }
         loadMore()
@@ -105,6 +116,26 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
                     if (e.message.chatId == chatId) msgs = msgs.map { if (it.id == e.oldMessageId) e.message else it }
                 is TdApi.UpdateMessageSendFailed ->
                     if (e.message.chatId == chatId) msgs = msgs.map { if (it.id == e.oldMessageId) e.message else it }
+                is TdApi.UpdateMessageEdited ->
+                    if (e.chatId == chatId) {
+                        msgs.firstOrNull { it.id == e.messageId }?.let { it.replyMarkup = e.replyMarkup; it.editDate = e.editDate }
+                        msgs = msgs.toList()
+                    }
+                is TdApi.UpdateDeleteMessages ->
+                    if (e.chatId == chatId && !e.fromCache) {
+                        val gone = e.messageIds.toSet()
+                        msgs = msgs.filter { it.id !in gone }
+                    }
+                is TdApi.UpdateChatAction ->
+                    if (e.chatId == chatId) {
+                        activity = when (e.action) {
+                            is TdApi.ChatActionTyping -> "écrit…"
+                            is TdApi.ChatActionUploadingDocument, is TdApi.ChatActionUploadingPhoto, is TdApi.ChatActionUploadingVideo -> "envoie un fichier…"
+                            is TdApi.ChatActionRecordingVoiceNote -> "enregistre un vocal…"
+                            else -> null
+                        }
+                        activityStamp++
+                    }
                 else -> Unit
             }
         }
@@ -117,12 +148,17 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
         }
     }
     LaunchedEffect(atEnd, msgs.size) { if (atEnd) loadMore() }
+    // Un nouveau message s'insère à l'index 0 : sans ceci, la liste reste ancrée et il apparaît hors de l'écran.
+    LaunchedEffect(msgs.firstOrNull()?.id) {
+        if (listState.firstVisibleItemIndex <= 1) listState.animateScrollToItem(0)
+    }
 
     fun doSend(text: String) {
         scope.launch {
             try {
                 val m = tg.sendText(chatId, text)
                 if (msgs.none { it.id == m.id }) msgs = listOf(m) + msgs
+                listState.animateScrollToItem(0)
             } catch (e: Exception) {
                 error = "Envoi impossible : " + e.message
             }
@@ -162,19 +198,36 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
         }
     }
 
+    fun openUrl(u: String) {
+        app.lock.skipNextLock = true
+        try {
+            ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            app.lock.skipNextLock = false
+            toast(ctx, "Impossible d'ouvrir le lien")
+        }
+    }
+
     fun onInline(m: TdApi.Message, b: TdApi.InlineKeyboardButton) {
         val run = {
             when (val t = b.type) {
                 is TdApi.InlineKeyboardButtonTypeCallback -> scope.launch {
+                    pendingPress++
                     try {
-                        tg.pressInline(chatId, m.id, t.data)?.let { toast(ctx, it) }
+                        val ans = tg.pressInline(chatId, m.id, t.data)
+                        if (!ans.url.isNullOrBlank()) openUrl(ans.url)
+                        val txt = ans.text
+                        if (!txt.isNullOrBlank()) { if (ans.showAlert) answer = txt else toast(ctx, txt) }
+                    } catch (e: TdException) {
+                        // 502/504 : le bot n'a pas répondu au « callback » à temps ; son action a tout de même pu être exécutée
+                        if (e.code == 502 || e.code == 504) toast(ctx, "Action envoyée au bot") else toast(ctx, "Action impossible : " + e.message)
                     } catch (e: Exception) {
-                        toast(ctx, "Action sans réponse : " + e.message)
+                        toast(ctx, "Action impossible : " + e.message)
                     }
+                    pendingPress--
                 }
-                is TdApi.InlineKeyboardButtonTypeUrl ->
-                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(t.url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                else -> toast(ctx, "Ce type de bouton n'est pas pris en charge")
+                is TdApi.InlineKeyboardButtonTypeUrl -> openUrl(t.url)
+                else -> toast(ctx, "Ce type de bouton n'est pas encore pris en charge")
             }
             Unit
         }
@@ -188,25 +241,57 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
     }
 
     Column(Modifier.fillMaxSize().imePadding()) {
+        val chatName = cfg.bots[chatId]?.displayName ?: chat?.title ?: "Chat"
         TopAppBar(
-            title = { Column { Text(cfg.bots[chatId]?.displayName ?: chat?.title ?: "Chat"); Text(activityLabel(chat?.lastMessage?.date ?: 0), style = MaterialTheme.typography.bodySmall) } },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    BotAvatar(chatId, chatName, 36.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text(chatName, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            ActivityDot(chat?.lastMessage?.date ?: 0)
+                            Spacer(Modifier.width(5.dp))
+                            Text(activity ?: activityLabel(chat?.lastMessage?.date ?: 0), style = MaterialTheme.typography.labelSmall, color = if (activity != null) Accent else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") } },
             actions = { onFiles?.let { f -> TextButton(onClick = f) { Text("Fichiers") } } },
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
         )
 
+        if (pendingPress > 0) LinearProgressIndicator(Modifier.fillMaxWidth())
         ErrorText(error)
-        LazyColumn(Modifier.weight(1f).padding(horizontal = 8.dp), state = listState, reverseLayout = true) {
-            items(msgs, key = { it.id }) { m -> Bubble(
-                m,
-                speaking = speakingId == m.id,
-                onSpeak = {
-                    if (speakingId == m.id) Speaker.stop()
-                    else Speaker.speak(ctx, Msg.caption(m) ?: Msg.text(m), m.id, cfg.voiceLang)
-                },
-                onSave = { d -> save(BackupFile(m.id, chatId, m.date, d, "", "")) },
-                onInline = { b -> onInline(m, b) },
-            ) } 
+        Box(Modifier.weight(1f)) {
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 8.dp), state = listState, reverseLayout = true, contentPadding = PaddingValues(vertical = 8.dp)) {
+            items(msgs.size, key = { msgs[it].id }) { i ->
+                val m = msgs[i]
+                val older = msgs.getOrNull(i + 1)
+                Column {
+                    if (older == null || dayKey(older.date) != dayKey(m.date)) DayChip(m.date)
+                    Bubble(
+                        m,
+                        speaking = speakingId == m.id,
+                        onSpeak = {
+                            if (speakingId == m.id) Speaker.stop()
+                            else Speaker.speak(ctx, Msg.caption(m) ?: Msg.text(m), m.id, cfg.voiceLang)
+                        },
+                        onSave = { d -> save(BackupFile(m.id, chatId, m.date, d, "", "")) },
+                        onInline = { b -> onInline(m, b) },
+                    )
+                }
+            }
             if (loading) item { Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(20.dp)) } }
+        }
+        if (listState.firstVisibleItemIndex > 2) {
+            Box(
+                Modifier.align(Alignment.BottomEnd).padding(12.dp).size(42.dp).clip(CircleShape).background(Accent)
+                    .clickable { scope.launch { listState.animateScrollToItem(0) } },
+                contentAlignment = Alignment.Center,
+            ) { Text("↓", color = Color.White, style = MaterialTheme.typography.titleMedium) }
+        }
         }
 
         if (!readOnly) {
@@ -232,12 +317,23 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { showCommands = true }) { Text("/", style = MaterialTheme.typography.titleLarge, color = Accent) }
-            OutlinedTextField(input, { input = it }, placeholder = { Text("Message ou /commande") }, modifier = Modifier.weight(1f), maxLines = 4)
-            IconButton(onClick = { startDictation() }) { Text("🎤", style = MaterialTheme.typography.titleLarge) }
-            IconButton(onClick = { trySend(input); input = "" }, enabled = input.isNotBlank()) {
-                Icon(Icons.AutoMirrored.Filled.Send, "Envoyer", tint = Accent)
+        Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
+                IconButton(onClick = { showCommands = true }) { Text("/", style = MaterialTheme.typography.titleLarge, color = Accent) }
+                OutlinedTextField(
+                    input, { input = it }, placeholder = { Text("Message ou /commande") },
+                    shape = RoundedCornerShape(24.dp), modifier = Modifier.weight(1f), maxLines = 4,
+                )
+                Spacer(Modifier.width(6.dp))
+                if (input.isBlank()) {
+                    Box(Modifier.size(48.dp).clip(CircleShape).background(Accent).clickable { startDictation() }, contentAlignment = Alignment.Center) {
+                        Text("🎤", style = MaterialTheme.typography.titleMedium)
+                    }
+                } else {
+                    Box(Modifier.size(48.dp).clip(CircleShape).background(Accent).clickable { trySend(input); input = "" }, contentAlignment = Alignment.Center) {
+                        Icon(Icons.AutoMirrored.Filled.Send, "Envoyer", tint = Color.White)
+                    }
+                }
             }
         }
         }
@@ -290,6 +386,15 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
         }
     }
 
+    answer?.let { txt ->
+        AlertDialog(
+            onDismissRequest = { answer = null },
+            title = { Text("Réponse du bot") },
+            text = { Text(txt) },
+            confirmButton = { TextButton(onClick = { answer = null }) { Text("OK") } },
+        )
+    }
+
     confirm?.let { (label, action) ->
         AlertDialog(
             onDismissRequest = { confirm = null },
@@ -312,11 +417,12 @@ private fun Bubble(
     val out = m.isOutgoing
     val failed = m.sendingState is TdApi.MessageSendingStateFailed
     val pending = m.sendingState is TdApi.MessageSendingStatePending
+    val shape = if (out) RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp) else RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)
     Column(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalAlignment = if (out) Alignment.End else Alignment.Start) {
         Column(
-            Modifier.widthIn(max = 300.dp)
-                .background(if (out) Accent else MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
-                .padding(10.dp)
+            Modifier.widthIn(max = 320.dp)
+                .background(if (out) Accent else MaterialTheme.colorScheme.surfaceVariant, shape)
+                .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
             when (val c = m.content) {
                 is TdApi.MessagePhoto -> PhotoView(c.photo)
@@ -332,7 +438,8 @@ private fun Bubble(
                 TextButton(onClick = onSpeak, contentPadding = PaddingValues(horizontal = 4.dp)) { Text(if (speaking) "⏹ Arrêter" else "🔊 Écouter") }
             }
             Text(
-                fmtDate(m.date) + if (failed) " · ⚠ échec" else if (pending) " · ⏳" else "",
+                fmtTime(m.date) + if (failed) " · ⚠ échec" else if (pending) " · ⏳" else "",
+                modifier = Modifier.align(Alignment.End),
                 style = MaterialTheme.typography.labelSmall,
                 color = if (failed) MaterialTheme.colorScheme.error else if (out) Color(0xFFD8E0FF) else MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -345,5 +452,17 @@ private fun Bubble(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DayChip(sec: Int) {
+    Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+        Text(
+            dayLabel(sec),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 10.dp, vertical = 4.dp),
+        )
     }
 }

@@ -8,7 +8,12 @@ import android.content.Intent
 import android.graphics.BitmapFactory
 import android.media.MediaPlayer
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -33,15 +38,22 @@ import java.io.File
 
 fun fmtDuration(sec: Int): String = String.format("%d:%02d", sec / 60, sec % 60)
 
-/** Lecteur audio unique : lancer un son arrête le précédent. */
+/** Lecteur audio unique : lancer un son arrête le précédent. Vitesse 1× / 1,5× / 2× et recherche dans la piste. */
 object AudioController {
     private var mp: MediaPlayer? = null
 
     /** (identifiant du fichier en cours, en lecture ?) */
     val state = MutableStateFlow(0 to false)
+    val speed = MutableStateFlow(1f)
+
+    private fun applySpeed() {
+        val p = mp ?: return
+        try { p.playbackParams = p.playbackParams.setSpeed(speed.value) } catch (e: Exception) { }
+    }
 
     fun play(path: String, fileId: Int) {
         stop()
+        Speaker.stop()
         val p = MediaPlayer()
         p.setDataSource(path)
         p.setOnCompletionListener {
@@ -52,6 +64,7 @@ object AudioController {
         p.prepare()
         p.start()
         mp = p
+        applySpeed()
         state.value = fileId to true
     }
 
@@ -62,7 +75,18 @@ object AudioController {
 
     fun resume() {
         mp?.start()
+        applySpeed()
         state.value = state.value.first to true
+    }
+
+    fun cycleSpeed() {
+        speed.value = when (speed.value) { 1f -> 1.5f; 1.5f -> 2f; else -> 1f }
+        if (state.value.second) applySpeed()
+    }
+
+    fun seekTo(fraction: Float) {
+        val p = mp ?: return
+        p.seekTo((p.duration * fraction.coerceIn(0f, 1f)).toInt())
     }
 
     fun fraction(): Float {
@@ -143,9 +167,10 @@ internal fun decode(path: String, target: Int = 1080): ImageBitmap? {
 }
 
 @Composable
-fun ImageFromFile(file: TdApi.File, mime: String) {
+fun ImageFromFile(file: TdApi.File, mime: String, onClick: (() -> Unit)? = null) {
     val app = LocalApp.current
     val open = rememberFileOpener()
+    val click: () -> Unit = onClick ?: { open(file, mime, "Image") }
     val state by produceState<Pair<ImageBitmap?, Boolean>>(null to false, file.id) {
         val bmp = try {
             val d = app.tg.download(file.id)
@@ -158,12 +183,12 @@ fun ImageFromFile(file: TdApi.File, mime: String) {
     if (bmp != null) {
         Image(
             bitmap = bmp, contentDescription = "Image", contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).clickable { open(file, mime, "Image") },
+            modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).clip(RoundedCornerShape(12.dp)).clickable { click() },
         )
     } else if (!state.second) {
         Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(24.dp)) }
     } else {
-        TextButton(onClick = { open(file, mime, "Image") }) { Text("Image indisponible — ouvrir") }
+        TextButton(onClick = { click() }) { Text("Aperçu indisponible — ouvrir") }
     }
 }
 
@@ -180,52 +205,90 @@ fun AudioRow(file: TdApi.File, title: String, durationSec: Int) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val st by AudioController.state.collectAsState()
+    val speed by AudioController.speed.collectAsState()
     val mine = st.first == file.id
     val playing = mine && st.second
     var busy by remember { mutableStateOf(false) }
     var pos by remember { mutableStateOf(0f) }
+    var dragging by remember { mutableStateOf(false) }
 
-    LaunchedEffect(playing) {
-        while (playing) { pos = AudioController.fraction(); delay(250) }
+    LaunchedEffect(playing, dragging) {
+        while (playing && !dragging) { pos = AudioController.fraction(); delay(250) }
         if (!mine) pos = 0f
     }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = {
-            when {
-                playing -> AudioController.pause()
-                mine -> AudioController.resume()
-                !busy -> scope.launch {
-                    busy = true
-                    try {
-                        val d = app.tg.download(file.id)
-                        val p = d.local.path
-                        if (!d.local.isDownloadingCompleted || p.isNullOrEmpty()) toast(ctx, "Téléchargement incomplet")
-                        else AudioController.play(p, file.id)
-                    } catch (e: Exception) {
-                        toast(ctx, "Lecture impossible : " + e.message)
+        Box(
+            Modifier.size(44.dp).clip(CircleShape).background(Accent).clickable {
+                when {
+                    playing -> AudioController.pause()
+                    mine -> AudioController.resume()
+                    !busy -> scope.launch {
+                        busy = true
+                        try {
+                            val d = app.tg.download(file.id)
+                            val p = d.local.path
+                            if (!d.local.isDownloadingCompleted || p.isNullOrEmpty()) toast(ctx, "Téléchargement incomplet")
+                            else AudioController.play(p, file.id)
+                        } catch (e: Exception) {
+                            toast(ctx, "Lecture impossible : " + e.message)
+                        }
+                        busy = false
                     }
-                    busy = false
                 }
-            }
-        }) {
-            if (busy) CircularProgressIndicator(Modifier.size(20.dp)) else Text(if (playing) "⏸" else "▶", style = MaterialTheme.typography.titleLarge)
+            },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (busy) CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
+            else Text(if (playing) "⏸" else "▶", color = Color.White, style = MaterialTheme.typography.titleMedium)
         }
-        Column(Modifier.width(200.dp)) {
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.width(190.dp)) {
             Text(title, maxLines = 1, style = MaterialTheme.typography.bodyMedium)
-            LinearProgressIndicator(progress = { if (mine) pos else 0f }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
-            Text(fmtDuration(durationSec) + " · " + fmtSize(maxOf(file.size, file.expectedSize)), style = MaterialTheme.typography.labelSmall)
+            Slider(
+                value = if (mine) pos else 0f,
+                onValueChange = { pos = it; dragging = true },
+                onValueChangeFinished = { AudioController.seekTo(pos); dragging = false },
+                enabled = mine,
+                modifier = Modifier.height(24.dp),
+            )
+            Text(
+                (if (mine) fmtDuration((pos * durationSec).toInt()) + " / " else "") + fmtDuration(durationSec) + " · " + fmtSize(maxOf(file.size, file.expectedSize)),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+        TextButton(onClick = { AudioController.cycleSpeed() }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+            Text(if (speed == 1f) "1×" else if (speed == 1.5f) "1,5×" else "2×")
+        }
+    }
+}
+
+/** Aperçu d'une vidéo : vignette Telegram (quelques Ko) + bouton lecture ; la vidéo n'est téléchargée qu'au toucher. */
+@Composable
+fun VideoPreview(video: TdApi.File, thumb: TdApi.Thumbnail?, mime: String, name: String, durationSec: Int) {
+    val open = rememberFileOpener()
+    val play = { open(video, mime.ifBlank { "video/mp4" }, name.ifBlank { "Vidéo" }) }
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { play() }) {
+        if (thumb != null) {
+            ImageFromFile(thumb.file, "image/jpeg", onClick = { play() })
+        } else {
+            Box(Modifier.fillMaxWidth().height(160.dp).background(Color(0xFF1A2F52)))
+        }
+        Box(Modifier.align(Alignment.Center).size(54.dp).clip(CircleShape).background(Color(0x99000000)), contentAlignment = Alignment.Center) {
+            Text("▶", color = Color.White, style = MaterialTheme.typography.titleLarge)
+        }
+        Box(Modifier.align(Alignment.BottomStart).padding(8.dp).clip(RoundedCornerShape(6.dp)).background(Color(0x99000000)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+            Text(
+                (if (durationSec > 0) fmtDuration(durationSec) + " · " else "") + fmtSize(maxOf(video.size, video.expectedSize)),
+                color = Color.White, style = MaterialTheme.typography.labelSmall,
+            )
         }
     }
 }
 
 @Composable
 fun VideoRow(video: TdApi.Video) {
-    val open = rememberFileOpener()
-    Column {
-        Text("🎞 " + video.fileName.ifBlank { "Vidéo" } + " · " + fmtDuration(video.duration) + " · " + fmtSize(maxOf(video.video.size, video.video.expectedSize)))
-        TextButton(onClick = { open(video.video, video.mimeType.ifBlank { "video/mp4" }, video.fileName.ifBlank { "Vidéo" }) }) { Text("Lire") }
-    }
+    VideoPreview(video.video, video.thumbnail, video.mimeType, video.fileName, video.duration)
 }
 
 @Composable
@@ -239,6 +302,7 @@ fun DocumentRow(doc: TdApi.Document, onSave: () -> Unit) {
     val handler = PreviewRegistry.find(doc.fileName, doc.mimeType, size)
 
     if (doc.mimeType.startsWith("image/") && size in 1L..15_000_000L) ImageFromFile(doc.document, doc.mimeType)
+    else if (doc.mimeType.startsWith("video/") && doc.thumbnail != null) VideoPreview(doc.document, doc.thumbnail, doc.mimeType, doc.fileName, 0)
     Text("📎 " + doc.fileName + " · " + fmtSize(size))
     Row {
         TextButton(onClick = { open(doc.document, doc.mimeType.ifBlank { "*/*" }, doc.fileName) }) { Text("Lire / ouvrir") }

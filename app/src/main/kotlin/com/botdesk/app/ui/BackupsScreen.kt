@@ -2,7 +2,10 @@
 
 package com.botdesk.app.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -34,32 +37,27 @@ fun BackupsScreen(onOpenChannel: (Long) -> Unit, onOpenHistory: () -> Unit) {
 
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
-            Text("Sauvegardes", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 16.dp))
+            ScreenHeader("Sauvegardes", "${selected.size} dépôt(s)")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
                 Button(onClick = { picking = true }) { Text(if (selected.isEmpty()) "Choisir les dépôts" else "Gérer les dépôts") }
                 OutlinedButton(onClick = onOpenHistory) { Text("Historique") }
             }
         }
-        if (selected.isEmpty()) {
-            item {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Aucun dépôt de sauvegarde", style = MaterialTheme.typography.titleSmall)
-                        Text("Choisissez les canaux ou groupes Telegram où vos serveurs publient leurs sauvegardes. Seuls ceux-là apparaîtront ici.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-        }
+        if (selected.isEmpty()) item { EmptyState("🗄", "Aucun dépôt de sauvegarde", "Choisissez les canaux ou groupes Telegram où vos serveurs publient leurs sauvegardes. Seuls ceux-là apparaîtront ici.") }
         items(selected, key = { it.id }) { c ->
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                onClick = { onOpenChannel(c.id) },
-            ) {
-                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            AppCard(Modifier.fillMaxWidth().padding(vertical = 4.dp), onClick = { onOpenChannel(c.id) }, padding = 12.dp) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(Accent.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
+                        Text("🗄", style = MaterialTheme.typography.titleMedium)
+                    }
+                    Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(c.title, style = MaterialTheme.typography.titleSmall)
-                        Text(tg.channelKind(c) + " · " + activityLabel(c.lastMessage?.date ?: 0), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(c.title, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            ActivityDot(c.lastMessage?.date ?: 0)
+                            Spacer(Modifier.width(6.dp))
+                            Text(tg.channelKind(c) + " · " + activityLabel(c.lastMessage?.date ?: 0), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                     Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -165,10 +163,14 @@ fun BackupFilesScreen(chatId: Long, onBack: () -> Unit, onMessages: (() -> Unit)
             LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp)) {
                 if (shown.isEmpty()) item { Text("Aucun fichier trouvé.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 items(shown, key = { it.msgId }) { f ->
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text(f.doc.fileName, style = MaterialTheme.typography.titleSmall)
-                            Text("${fmtDate(f.date)} · ${fmtSize(f.doc.document.size)} · ${FormatDetector.guess(f.doc.fileName, f.doc.mimeType)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    AppCard(Modifier.fillMaxWidth().padding(vertical = 4.dp), padding = 12.dp) {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(f.doc.fileName, style = MaterialTheme.typography.titleSmall, maxLines = 2, modifier = Modifier.weight(1f))
+                                Spacer(Modifier.width(8.dp))
+                                FormatBadge(FormatDetector.guess(f.doc.fileName, f.doc.mimeType))
+                            }
+                            Text("${fmtDate(f.date)} · ${fmtSize(f.doc.document.size)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             if (f.sender.isNotBlank()) Text("Expéditeur : " + f.sender, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             if (f.caption.isNotBlank()) Text(f.caption, style = MaterialTheme.typography.bodySmall, maxLines = 3)
                             Row {

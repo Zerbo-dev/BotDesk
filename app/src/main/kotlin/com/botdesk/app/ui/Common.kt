@@ -65,7 +65,7 @@ fun toast(ctx: Context, msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_LON
 
 @Composable
 fun SectionTitle(text: String) {
-    Text(text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
+    SectionHeader(text)
 }
 
 @Composable

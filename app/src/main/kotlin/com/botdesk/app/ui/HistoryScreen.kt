@@ -42,10 +42,7 @@ fun HistoryScreen(onOpen: (Long) -> Unit, onBack: () -> Unit) {
         LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp)) {
             if (shown.isEmpty()) item { Text("Aucun fichier.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp)) }
             items(shown, key = { it.chatId.toString() + "_" + it.msgId }) { f ->
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onOpen(f.chatId) },
-                ) {
+                AppCard(Modifier.fillMaxWidth().padding(vertical = 4.dp), onClick = { onOpen(f.chatId) }, padding = 0.dp) {
                     Column(Modifier.padding(12.dp)) {
                         Text((if (f.downloaded) "⬇ " else "") + f.name, style = MaterialTheme.typography.titleSmall)
                         Text("${f.chatTitle} · ${fmtDate(f.date)} · ${fmtSize(f.size)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

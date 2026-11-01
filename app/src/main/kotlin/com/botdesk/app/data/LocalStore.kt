@@ -19,6 +19,9 @@ data class BotMeta(
     val muted: Boolean = false,
     val hidden: Boolean = false,
     val pinnedCommands: List<String> = emptyList(),
+    /** 0 = pas d'image choisie ; incrémenté à chaque nouvelle image (invalide le cache). */
+    val avatarVersion: Int = 0,
+    val avatarEmoji: String? = null,
 )
 
 data class AppConfig(
@@ -41,6 +44,12 @@ data class AppConfig(
     val voiceLang: String = "auto",
     val voiceAutoSend: Boolean = false,
     val voiceAutoRead: Boolean = false,
+    /** "system" (voix du téléphone) | "eleven" (ElevenLabs, clé API de l'utilisateur). */
+    val ttsEngine: String = "system",
+    val ttsVoice: String = "",
+    val ttsRate: Float = 1f,
+    val ttsPitch: Float = 1f,
+    val elevenVoiceId: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("app", "botdesk")
@@ -54,6 +63,8 @@ data class AppConfig(
                     put("favorite", m.favorite)
                     put("muted", m.muted)
                     put("hidden", m.hidden)
+                    put("avatarVersion", m.avatarVersion)
+                    m.avatarEmoji?.let { put("avatarEmoji", it) }
                     put("pinnedCommands", JSONArray().also { a -> m.pinnedCommands.forEach { a.put(it) } })
                     m.categoryId?.let { put("categoryId", it) }
                     m.displayName?.let { put("displayName", it) }
@@ -73,6 +84,11 @@ data class AppConfig(
         put("voiceLang", voiceLang)
         put("voiceAutoSend", voiceAutoSend)
         put("voiceAutoRead", voiceAutoRead)
+        put("ttsEngine", ttsEngine)
+        put("ttsVoice", ttsVoice)
+        put("ttsRate", ttsRate.toDouble())
+        put("ttsPitch", ttsPitch.toDouble())
+        put("elevenVoiceId", elevenVoiceId)
     }
 
     companion object {
@@ -98,6 +114,8 @@ data class AppConfig(
                         description = m.str("description"),
                         muted = m.optBoolean("muted", false),
                         hidden = m.optBoolean("hidden", false),
+                        avatarVersion = m.optInt("avatarVersion", 0),
+                        avatarEmoji = m.str("avatarEmoji"),
                         pinnedCommands = m.optJSONArray("pinnedCommands")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
                     )
                 }
@@ -119,6 +137,11 @@ data class AppConfig(
                 voiceLang = o.str("voiceLang") ?: "auto",
                 voiceAutoSend = o.optBoolean("voiceAutoSend", false),
                 voiceAutoRead = o.optBoolean("voiceAutoRead", false),
+                ttsEngine = o.str("ttsEngine") ?: "system",
+                ttsVoice = o.str("ttsVoice") ?: "",
+                ttsRate = o.optDouble("ttsRate", 1.0).toFloat(),
+                ttsPitch = o.optDouble("ttsPitch", 1.0).toFloat(),
+                elevenVoiceId = o.str("elevenVoiceId") ?: "",
             )
         }
     }
