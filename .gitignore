@@ -8,3 +8,4 @@ local.properties
 # Générés par la CI (TDLib compilé depuis la source officielle)
 app/src/main/java/org/drinkless/
 app/src/main/jniLibs/
+nn.h
