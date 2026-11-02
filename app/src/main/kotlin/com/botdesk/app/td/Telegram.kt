@@ -3,6 +3,7 @@ package com.botdesk.app.td
 import android.content.Context
 import android.os.Build
 import android.util.Base64
+import com.botdesk.app.DebugLog
 import com.botdesk.app.core.SecureStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -81,7 +82,10 @@ class Telegram(
             cont.resumeWithException(IllegalStateException("TDLib n'est pas démarré"))
         } else {
             c.send(f, { r ->
-                if (r is TdApi.Error) cont.resumeWithException(TdException(r.code, r.message))
+                if (r is TdApi.Error) {
+                    if (r.code != 404) DebugLog.add("TDLib erreur ${r.code} : ${r.message} (${f.javaClass.simpleName})")
+                    cont.resumeWithException(TdException(r.code, r.message))
+                }
                 else cont.resume(r as T)
             }, { e -> cont.resumeWithException(e) })
         }
@@ -230,6 +234,8 @@ class Telegram(
         }
         return emptyList()
     }
+
+    suspend fun getMessage(chatId: Long, messageId: Long): TdApi.Message = request(TdApi.GetMessage(chatId, messageId))
 
     suspend fun sendText(chatId: Long, text: String): TdApi.Message {
         val content = TdApi.InputMessageText()

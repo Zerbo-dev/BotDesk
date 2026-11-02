@@ -31,9 +31,9 @@ data class AppConfig(
     val alertKeywords: String = DEFAULT_ALERT_KEYWORDS,
     val sensitiveKeywords: String = DEFAULT_SENSITIVE_KEYWORDS,
     /** "off" | "alerts" | "all" */
-    val notifyBots: String = "alerts",
+    val notifyBots: String = "all",
     val notifyBackups: Boolean = true,
-    val backgroundService: Boolean = false,
+    val backgroundService: Boolean = true,
     /** "dark" | "light" | "system" */
     val theme: String = "dark",
     /** Demander confirmation avant de télécharger un fichier plus gros (en Mo). 0 = jamais. */
@@ -128,9 +128,9 @@ data class AppConfig(
                 backupChannels = ch,
                 alertKeywords = o.str("alertKeywords") ?: DEFAULT_ALERT_KEYWORDS,
                 sensitiveKeywords = o.str("sensitiveKeywords") ?: DEFAULT_SENSITIVE_KEYWORDS,
-                notifyBots = o.str("notifyBots") ?: "alerts",
+                notifyBots = o.str("notifyBots") ?: "all",
                 notifyBackups = o.optBoolean("notifyBackups", true),
-                backgroundService = o.optBoolean("backgroundService", false),
+                backgroundService = o.optBoolean("backgroundService", true),
                 theme = o.str("theme") ?: "dark",
                 confirmDownloadMb = o.optInt("confirmDownloadMb", 100),
                 indexRetentionDays = o.optInt("indexRetentionDays", 90),

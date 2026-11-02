@@ -2,6 +2,14 @@
 
 package com.botdesk.app.ui
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -42,6 +50,10 @@ fun HomeScreen(onOpenChat: (Long) -> Unit, onOpenChannel: (Long) -> Unit, onNavi
     val recent = remember(tick) { bots.take(5) }
 
     var target by remember { mutableStateOf<Long?>(null) }
+    var bannerDismissed by remember { mutableStateOf(false) }
+    val notifAllowed = remember(tick) { NotificationManagerCompat.from(ctx).areNotificationsEnabled() }
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val needsNotifSetup = !bannerDismissed && cfg.notifyBots != "off" && (!notifAllowed || !cfg.backgroundService)
     var menu by remember { mutableStateOf(false) }
     var quick by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf<String?>(null) }
@@ -113,6 +125,32 @@ fun HomeScreen(onOpenChat: (Long) -> Unit, onOpenChannel: (Long) -> Unit, onNavi
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Tile(Icons.Default.Warning, "Alertes", "Alertes et rapports", Modifier.weight(1f)) { onNavigate(Tab.Alerts) }
                 Tile(Icons.Default.Settings, "Réglages", "Personnaliser l'app", Modifier.weight(1f)) { onNavigate(Tab.Settings) }
+            }
+        }
+        if (needsNotifSetup) {
+            item {
+                Spacer(Modifier.height(12.dp))
+                AppCard(Modifier.fillMaxWidth()) {
+                    Text("Recevoir les notifications même app fermée", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "BotDesk doit rester connecté à Telegram en arrière-plan et être autorisé à afficher des notifications.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row {
+                        TextButton(onClick = {
+                            app.store.update { it.copy(backgroundService = true) }
+                            app.notifier.syncService()
+                            val denied = Build.VERSION.SDK_INT >= 33 &&
+                                ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                            if (denied) permLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            else if (!notifAllowed) {
+                                app.lock.skipNextLock = true
+                                ctx.startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName))
+                            }
+                        }) { Text("Activer") }
+                        TextButton(onClick = { bannerDismissed = true }) { Text("Plus tard") }
+                    }
+                }
             }
         }
         if (favorites.isNotEmpty()) {

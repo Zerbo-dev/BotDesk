@@ -183,7 +183,7 @@ fun ImageFromFile(file: TdApi.File, mime: String, onClick: (() -> Unit)? = null)
     if (bmp != null) {
         Image(
             bitmap = bmp, contentDescription = "Image", contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).clip(RoundedCornerShape(12.dp)).clickable { click() },
+            modifier = Modifier.fillMaxWidth().aspectRatio((bmp.width.toFloat() / bmp.height).coerceIn(0.75f, 2.4f)).clip(RoundedCornerShape(12.dp)).clickable { click() },
         )
     } else if (!state.second) {
         Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(24.dp)) }

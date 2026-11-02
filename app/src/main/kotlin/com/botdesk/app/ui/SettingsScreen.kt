@@ -3,6 +3,14 @@
 package com.botdesk.app.ui
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.sp
+import com.botdesk.app.DebugLog
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -229,6 +237,46 @@ fun SettingsScreen(activity: FragmentActivity) {
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } }
+
+        item { SectionTitle("Diagnostic des notifications") }
+        item {
+            AppCard(Modifier.fillMaxWidth()) {
+                var status by remember { mutableStateOf(app.notifier.status()) }
+                val log by DebugLog.tail.collectAsState()
+                status.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                Row(Modifier.padding(top = 6.dp)) {
+                    TextButton(onClick = { status = app.notifier.status() }) { Text("Actualiser") }
+                    TextButton(onClick = { toast(ctx, app.notifier.postTest()) }) { Text("Notification de test") }
+                }
+                Row {
+                    TextButton(onClick = {
+                        app.lock.skipNextLock = true
+                        ctx.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName))
+                    }) { Text("Réglages de notification") }
+                    TextButton(onClick = {
+                        app.lock.skipNextLock = true
+                        try { ctx.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+                        catch (e: Exception) { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ctx.packageName))) }
+                    }) { Text("Batterie") }
+                }
+                Text(
+                    "Sur Huawei, Honor, Xiaomi, Oppo ou Samsung, le système arrête souvent les apps en arrière-plan : mettez BotDesk en « lancement manuel » (tout autoriser) " +
+                        "dans les réglages de batterie, et verrouillez-le dans les applications récentes.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 6.dp),
+                )
+                Text("Journal (plus récent en haut)", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    if (log.isEmpty()) "Aucun événement pour l'instant." else log.take(14).joinToString("\n"),
+                    fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                )
+                TextButton(onClick = {
+                    val cm = ctx.getSystemService(ClipboardManager::class.java)
+                    cm.setPrimaryClip(ClipData.newPlainText("journal BotDesk", (status + log).joinToString("\n")))
+                    toast(ctx, "Journal copié")
+                }) { Text("Copier le journal") }
+            }
+        }
 
         item { SectionTitle("Stockage et téléchargements") }
         item { AppCard(Modifier.fillMaxWidth()) {

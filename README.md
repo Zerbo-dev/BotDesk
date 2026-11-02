@@ -34,6 +34,7 @@ APK signé (optionnel) : ajoutez les secrets `KEYSTORE_BASE64`, `KEYSTORE_PASSWO
 - **Chat :** messages ; bouton « / » qui ouvre la liste des commandes du bot (filtre, insertion, envoi direct, épinglage) ; raccourcis épinglés au-dessus du clavier ; suggestions automatiques quand on tape « / » ; boutons inline, claviers de réponse, réception de fichiers.
 - **Sauvegardes :** l'écran n'affiche que les dépôts choisis (sélecteur via « Gérer les dépôts »), parcours (500 derniers messages), recherche par nom/légende/expéditeur, filtre par format, téléchargement tel quel vers l'emplacement de votre choix, aperçu texte, détection de format par signature, confirmation des gros fichiers, historique local des fichiers consultés (hors connexion).
 - **Alertes :** messages classés par mots-clés configurables.
+- **Diagnostic :** Réglages > Diagnostic des notifications (état des autorisations, notification de test, raccourcis batterie/notifications Android, journal des boutons et des notifications, copiable).
 - **Notifications :** locales (aucun serveur de push) : bots (aucune/alertes/tous), nouvelles sauvegardes, mode « rester connecté en arrière-plan » (service de premier plan), contenu masqué si un PIN est actif.
 - **Réglages :** thème (système/sombre/clair), stockage (taille, vidage du cache, seuil de confirmation), durée de l'historique, mots-clés, catégories, export/import chiffré de la configuration, déconnexion.
 - **Sécurité :** PIN haché (PBKDF2), biométrie, verrouillage à la mise en arrière-plan, base TDLib chiffrée, clés API chiffrées (Keystore).

@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.botdesk.app.data.BotMeta
+import com.botdesk.app.DebugLog
 import com.botdesk.app.td.BackupFile
 import com.botdesk.app.td.Msg
 import com.botdesk.app.td.TdException
@@ -198,6 +199,17 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
         }
     }
 
+    suspend fun refreshAfterPress(pressedId: Long) {
+        try {
+            val fresh = tg.getMessage(chatId, pressedId)
+            msgs = msgs.map { if (it.id == pressedId) fresh else it }
+        } catch (e: Exception) { }
+        val page = tg.history(chatId, 0L, 15)
+        val known = msgs.map { it.id }.toSet()
+        val newer = page.filter { it.id !in known }.sortedByDescending { it.id }
+        if (newer.isNotEmpty()) msgs = newer + msgs
+    }
+
     fun openUrl(u: String) {
         app.lock.skipNextLock = true
         try {
@@ -213,18 +225,27 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
             when (val t = b.type) {
                 is TdApi.InlineKeyboardButtonTypeCallback -> scope.launch {
                     pendingPress++
+                    DebugLog.add("Bouton « ${b.text} » envoyé (message ${m.id})")
                     try {
                         val ans = tg.pressInline(chatId, m.id, t.data)
+                        DebugLog.add("Bouton « ${b.text} » : le bot a répondu (texte=${ans.text?.take(40)}, alerte=${ans.showAlert})")
                         if (!ans.url.isNullOrBlank()) openUrl(ans.url)
                         val txt = ans.text
                         if (!txt.isNullOrBlank()) { if (ans.showAlert) answer = txt else toast(ctx, txt) }
                     } catch (e: TdException) {
+                        DebugLog.add("Bouton « ${b.text} » : erreur ${e.code} ${e.message}")
                         // 502/504 : le bot n'a pas répondu au « callback » à temps ; son action a tout de même pu être exécutée
-                        if (e.code == 502 || e.code == 504) toast(ctx, "Action envoyée au bot") else toast(ctx, "Action impossible : " + e.message)
+                        if (e.code == 502 || e.code == 504) toast(ctx, "Action envoyée au bot") else toast(ctx, "Action impossible (${e.code}) : " + e.message)
                     } catch (e: Exception) {
+                        DebugLog.add("Bouton « ${b.text} » : échec ${e.message}")
                         toast(ctx, "Action impossible : " + e.message)
                     }
                     pendingPress--
+                    // Le bot répond souvent en modifiant le message ou en en envoyant un nouveau : on resynchronise.
+                    try {
+                        delay(1200); refreshAfterPress(m.id)
+                        delay(3500); refreshAfterPress(m.id)
+                    } catch (e: Exception) { }
                 }
                 is TdApi.InlineKeyboardButtonTypeUrl -> openUrl(t.url)
                 else -> toast(ctx, "Ce type de bouton n'est pas encore pris en charge")

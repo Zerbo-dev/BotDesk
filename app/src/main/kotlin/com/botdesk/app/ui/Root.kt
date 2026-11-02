@@ -1,6 +1,14 @@
 package com.botdesk.app.ui
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -53,6 +61,17 @@ fun Root(activity: FragmentActivity) {
 @Composable
 private fun Shell(activity: FragmentActivity) {
     val app = LocalApp.current
+    val ctx = LocalContext.current
+    val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    LaunchedEffect(Unit) {
+        val flags = ctx.getSharedPreferences("botdesk_flags", Context.MODE_PRIVATE)
+        if (Build.VERSION.SDK_INT >= 33 && !flags.getBoolean("notif_asked", false) &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            flags.edit().putBoolean("notif_asked", true).apply()
+            notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     var tab by remember { mutableStateOf(Tab.Home) }
     var chatId by remember { mutableStateOf<Long?>(null) }
     var channelId by remember { mutableStateOf<Long?>(null) }
