@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -102,9 +103,8 @@ private fun Shell(activity: FragmentActivity) {
     val c = chatId
     val ch = channelId
     val v = viewer
-    if (v != null) {
-        ViewerScreen(v) { app.viewer.value = null }
-    } else if (c != null) {
+    Box(Modifier.fillMaxSize()) {
+    if (c != null) {
         ChatScreen(c, onBack = { chatId = null })
     } else if (ch != null) {
         ChannelHost(ch) { channelId = null }
@@ -140,6 +140,11 @@ private fun Shell(activity: FragmentActivity) {
                 }
             }
         }
+    }
+    // Le lecteur s'affiche PAR-DESSUS : l'écran dessous reste composé, donc on retrouve la même position au retour.
+    if (v != null) {
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) { ViewerScreen(v) { app.viewer.value = null } }
+    }
     }
 }
 

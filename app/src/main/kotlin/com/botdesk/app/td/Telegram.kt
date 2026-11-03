@@ -98,7 +98,10 @@ class Telegram(
             is TdApi.UpdateAuthorizationState -> onAuth(o.authorizationState)
             is TdApi.UpdateNewChat -> { chats[o.chat.id] = o.chat; bump() }
             is TdApi.UpdateChatLastMessage -> { chats[o.chatId]?.lastMessage = o.lastMessage; bump() }
-            is TdApi.UpdateChatReadInbox -> { chats[o.chatId]?.unreadCount = o.unreadCount; bump() }
+            is TdApi.UpdateChatReadInbox -> {
+                chats[o.chatId]?.let { it.unreadCount = o.unreadCount; it.lastReadInboxMessageId = o.lastReadInboxMessageId }
+                bump()
+            }
             is TdApi.UpdateChatTitle -> { chats[o.chatId]?.title = o.title; bump() }
             is TdApi.UpdateUser -> { users[o.user.id] = o.user; bump() }
             is TdApi.UpdateChatPhoto -> { chats[o.chatId]?.photo = o.photo; bump() }
@@ -233,6 +236,34 @@ class Telegram(
             if (attempt < 2) delay(500)
         }
         return emptyList()
+    }
+
+    /** Marque des messages comme lus (met à jour les compteurs, ici et dans Telegram). */
+    suspend fun markRead(chatId: Long, ids: LongArray) {
+        val r = TdApi.ViewMessages()
+        r.chatId = chatId
+        r.messageIds = ids
+        r.forceRead = true
+        request(r)
+    }
+
+    /** Mode « inline » des bots : recherche (ex. musique) puis envoi du résultat choisi. */
+    suspend fun inlineResults(botUserId: Long, chatId: Long, query: String, offset: String): TdApi.InlineQueryResults {
+        val r = TdApi.GetInlineQueryResults()
+        r.botUserId = botUserId
+        r.chatId = chatId
+        r.query = query
+        r.offset = offset
+        return request(r)
+    }
+
+    suspend fun sendInline(chatId: Long, queryId: Long, resultId: String): TdApi.Message {
+        val r = TdApi.SendInlineQueryResultMessage()
+        r.chatId = chatId
+        r.queryId = queryId
+        r.resultId = resultId
+        r.hideViaBot = false
+        return request(r)
     }
 
     suspend fun getMessage(chatId: Long, messageId: Long): TdApi.Message = request(TdApi.GetMessage(chatId, messageId))

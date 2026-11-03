@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.botdesk.app.data.BotMeta
+import com.botdesk.app.AppState
 import com.botdesk.app.DebugLog
 import com.botdesk.app.td.BackupFile
 import com.botdesk.app.td.Msg
@@ -57,6 +58,11 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
     var activityStamp by remember { mutableStateOf(0) }
     var pendingPress by remember { mutableStateOf(0) }
     var answer by remember { mutableStateOf<String?>(null) }
+    var inlineBot by remember(chatId) { mutableStateOf<Long?>(null) }
+    var inlineList by remember(chatId) { mutableStateOf<List<InlineItem>>(emptyList()) }
+    var inlineNext by remember(chatId) { mutableStateOf("") }
+    var inlineLoading by remember(chatId) { mutableStateOf(false) }
+    var inlineError by remember(chatId) { mutableStateOf<String?>(null) }
     var loading by remember(chatId) { mutableStateOf(false) }
     var endReached by remember(chatId) { mutableStateOf(false) }
     var input by remember { mutableStateOf("") }
@@ -153,6 +159,30 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
     LaunchedEffect(msgs.firstOrNull()?.id) {
         if (listState.firstVisibleItemIndex <= 1) listState.animateScrollToItem(0)
     }
+    // Marque les messages entrants comme lus tant que la conversation est affichée (met à jour les compteurs).
+    LaunchedEffect(msgs.firstOrNull()?.id, chatId) {
+        if (!AppState.foreground) return@LaunchedEffect
+        val ids = msgs.take(30).filter { !it.isOutgoing }.map { it.id }.toLongArray()
+        if (ids.isNotEmpty()) try { tg.markRead(chatId, ids) } catch (e: Exception) { }
+    }
+    // Recherche inline (avec petit délai pendant la frappe)
+    LaunchedEffect(input, inlineBot) {
+        val bot = inlineBot
+        if (bot == null || input.isBlank()) { inlineList = emptyList(); inlineNext = ""; inlineError = null; return@LaunchedEffect }
+        delay(450)
+        inlineLoading = true
+        inlineError = null
+        try {
+            val r = tg.inlineResults(bot, chatId, input.trim(), "")
+            inlineList = toInlineItems(r)
+            inlineNext = r.nextOffset ?: ""
+            if (inlineList.isEmpty()) inlineError = "Aucun résultat"
+        } catch (e: Exception) {
+            DebugLog.add("Recherche inline : erreur ${e.message}")
+            inlineError = "Recherche impossible : " + e.message
+        }
+        inlineLoading = false
+    }
 
     fun doSend(text: String) {
         scope.launch {
@@ -196,6 +226,44 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
         } catch (e: Exception) {
             app.lock.skipNextLock = false
             toast(ctx, "Reconnaissance vocale indisponible sur ce téléphone")
+        }
+    }
+
+    fun enterInline(prefill: String) {
+        val uid = tg.chat(chatId)?.let { tg.botUserId(it) }
+        if (uid == null) { toast(ctx, "La recherche en ligne ne fonctionne qu'avec un bot"); return }
+        DebugLog.add("Mode recherche en ligne ouvert (préfixe « $prefill »)")
+        inlineBot = uid
+        input = prefill
+    }
+
+    fun pickInline(item: InlineItem) {
+        scope.launch {
+            try {
+                val m = tg.sendInline(chatId, item.queryId, item.id)
+                if (msgs.none { it.id == m.id }) msgs = listOf(m) + msgs
+                listState.animateScrollToItem(0)
+                inlineBot = null
+                input = ""
+            } catch (e: Exception) {
+                DebugLog.add("Envoi du résultat inline : erreur ${e.message}")
+                toast(ctx, "Envoi impossible : " + e.message)
+            }
+        }
+    }
+
+    fun loadMoreInline() {
+        val bot = inlineBot ?: return
+        scope.launch {
+            inlineLoading = true
+            try {
+                val r = tg.inlineResults(bot, chatId, input.trim(), inlineNext)
+                inlineList = inlineList + toInlineItems(r)
+                inlineNext = r.nextOffset ?: ""
+            } catch (e: Exception) {
+                inlineError = "Chargement impossible : " + e.message
+            }
+            inlineLoading = false
         }
     }
 
@@ -248,7 +316,13 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
                     } catch (e: Exception) { }
                 }
                 is TdApi.InlineKeyboardButtonTypeUrl -> openUrl(t.url)
-                else -> toast(ctx, "Ce type de bouton n'est pas encore pris en charge")
+                is TdApi.InlineKeyboardButtonTypeWebApp -> openUrl(t.url)
+                is TdApi.InlineKeyboardButtonTypeLoginUrl -> openUrl(t.url)
+                is TdApi.InlineKeyboardButtonTypeSwitchInline -> enterInline(t.query)
+                else -> {
+                    DebugLog.add("Bouton « ${b.text} » : type non pris en charge (${t.javaClass.simpleName})")
+                    toast(ctx, "Type de bouton non pris en charge : " + t.javaClass.simpleName.removePrefix("InlineKeyboardButtonType"))
+                }
             }
             Unit
         }
@@ -316,6 +390,26 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
         }
 
         if (!readOnly) {
+        if (inlineBot != null) {
+            Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).background(MaterialTheme.colorScheme.surfaceVariant)) {
+                Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Recherche avec " + (cfg.bots[chatId]?.displayName ?: chat?.title ?: "le bot") + " — tapez votre recherche", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { inlineBot = null; input = "" }) { Text("Fermer") }
+                }
+                if (inlineLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                inlineError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) }
+                LazyColumn {
+                    items(inlineList.size) { i ->
+                        val it0 = inlineList[i]
+                        Column(Modifier.fillMaxWidth().clickable { pickInline(it0) }.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                            Text(it0.title, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                            if (it0.subtitle.isNotBlank()) Text(it0.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        }
+                    }
+                    if (inlineNext.isNotBlank()) item { TextButton(onClick = { loadMoreInline() }) { Text("Plus de résultats") } }
+                }
+            }
+        }
         val kb = msgs.firstOrNull { !it.isOutgoing && it.replyMarkup != null }?.replyMarkup as? TdApi.ReplyMarkupShowKeyboard
         kb?.rows?.forEach { row ->
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -341,12 +435,21 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
         Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
                 IconButton(onClick = { showCommands = true }) { Text("/", style = MaterialTheme.typography.titleLarge, color = Accent) }
+                if (chat != null && tg.isBotChat(chat)) {
+                    IconButton(onClick = { if (inlineBot != null) { inlineBot = null; input = "" } else enterInline("") }) {
+                        Text("@", style = MaterialTheme.typography.titleLarge, color = if (inlineBot != null) Color.White else Accent, modifier = Modifier.then(if (inlineBot != null) Modifier.clip(CircleShape).background(Accent).padding(horizontal = 8.dp) else Modifier))
+                    }
+                }
                 OutlinedTextField(
-                    input, { input = it }, placeholder = { Text("Message ou /commande") },
+                    input, { input = it }, placeholder = { Text(if (inlineBot != null) "Rechercher…" else "Message ou /commande") },
                     shape = RoundedCornerShape(24.dp), modifier = Modifier.weight(1f), maxLines = 4,
                 )
                 Spacer(Modifier.width(6.dp))
-                if (input.isBlank()) {
+                if (inlineBot != null) {
+                    Box(Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant).clickable { inlineBot = null; input = "" }, contentAlignment = Alignment.Center) {
+                        Text("✕", style = MaterialTheme.typography.titleMedium)
+                    }
+                } else if (input.isBlank()) {
                     Box(Modifier.size(48.dp).clip(CircleShape).background(Accent).clickable { startDictation() }, contentAlignment = Alignment.Center) {
                         Text("🎤", style = MaterialTheme.typography.titleMedium)
                     }

@@ -27,6 +27,7 @@ APK signé (optionnel) : ajoutez les secrets `KEYSTORE_BASE64`, `KEYSTORE_PASSWO
 - **Recherche d'historique :** dans l'onglet Bots, taper un terme puis « Chercher dans tout l'historique » (messages des bots et des dépôts).
 - **Interface :** thème sombre/clair, cartes arrondies, avatars, pastilles d'activité (bleu = activité récente, orange = donnée ancienne, gris = inconnu ; jamais vert pour ne pas laisser croire qu'un service fonctionne), séparateurs de jours et bulles dans les conversations, saisie en pilule avec micro/envoi.
 - **Bots interactifs en direct :** boutons inline (indicateur de progression, réponses/alertes du bot, liens), messages modifiés ou supprimés par le bot mis à jour en temps réel, indicateur « écrit… », défilement automatique vers les nouveaux messages et bouton ↓.
+- **Recherche en ligne des bots (inline) :** boutons « Search … » des bots musique, bouton « @ » dans la saisie : résultats en liste, envoi du résultat choisi dans la conversation. La lecture marque les messages comme lus (compteurs à jour). Un média ouvert s'affiche par-dessus la conversation, qui garde sa position.
 - **Avatars des bots :** image de votre galerie (recadrée en carré, gardée localement), emoji, ou photo de profil Telegram par défaut. Les images d'avatar ne sont pas incluses dans l'export de configuration.
 - **Vidéos :** vignette Telegram avec bouton lecture et durée ; la vidéo ne se télécharge qu'au toucher.
 - **Audio :** lecteur intégré avec curseur de position et vitesse 1×/1,5×/2×.
