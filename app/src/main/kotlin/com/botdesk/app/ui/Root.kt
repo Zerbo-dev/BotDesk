@@ -77,6 +77,7 @@ private fun Shell(activity: FragmentActivity) {
     var chatId by remember { mutableStateOf<Long?>(null) }
     var channelId by remember { mutableStateOf<Long?>(null) }
     var showHistory by remember { mutableStateOf(false) }
+    var autoPlay by remember { mutableStateOf<AutoPlayRequest?>(null) }
 
     // Ouverture depuis une notification
     val pending by app.pendingChat.collectAsState()
@@ -93,6 +94,7 @@ private fun Shell(activity: FragmentActivity) {
     }
     val viewer by app.viewer.collectAsState()
     BackHandler(enabled = viewer != null) { app.viewer.value = null }
+    BackHandler(enabled = autoPlay != null && viewer == null) { autoPlay = null }
 
     val openSource: (Long) -> Unit = { id ->
         val chat = app.tg.chat(id)
@@ -105,9 +107,9 @@ private fun Shell(activity: FragmentActivity) {
     val v = viewer
     Box(Modifier.fillMaxSize()) {
     if (c != null) {
-        ChatScreen(c, onBack = { chatId = null })
+        ChatScreen(c, onBack = { chatId = null }, onAutoPlay = { fwd, start -> autoPlay = AutoPlayRequest(c, fwd, start) })
     } else if (ch != null) {
-        ChannelHost(ch) { channelId = null }
+        ChannelHost(ch, { fwd, start -> autoPlay = AutoPlayRequest(ch, fwd, start) }) { channelId = null }
     } else if (showHistory) {
         HistoryScreen(onOpen = openSource) { showHistory = false }
     } else {
@@ -145,15 +147,19 @@ private fun Shell(activity: FragmentActivity) {
     if (v != null) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) { ViewerScreen(v) { app.viewer.value = null } }
     }
+    val ap = autoPlay
+    if (ap != null && v == null) {
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) { AutoPlayScreen(ap) { autoPlay = null } }
+    }
     }
 }
 
 /** Un canal s'ouvre sur ses messages (lecture seule) ; le bouton « Fichiers » bascule vers la liste des fichiers. */
 @Composable
-private fun ChannelHost(id: Long, onBack: () -> Unit) {
+private fun ChannelHost(id: Long, onAutoPlay: (Boolean, Long?) -> Unit, onBack: () -> Unit) {
     val app = LocalApp.current
     var files by remember(id) { mutableStateOf(false) }
     val isChannel = app.tg.chat(id)?.let { app.tg.channelKind(it) == "Canal" } ?: true
     if (files) BackupFilesScreen(id, onBack = { files = false }, onMessages = { files = false })
-    else ChatScreen(id, onBack = onBack, readOnly = isChannel, onFiles = { files = true })
+    else ChatScreen(id, onBack = onBack, readOnly = isChannel, onFiles = { files = true }, onAutoPlay = onAutoPlay)
 }

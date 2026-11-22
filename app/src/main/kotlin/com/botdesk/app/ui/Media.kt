@@ -8,6 +8,16 @@ import android.content.Intent
 import android.graphics.BitmapFactory
 import android.media.MediaPlayer
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
@@ -200,7 +210,83 @@ fun PhotoView(photo: TdApi.Photo) {
 }
 
 @Composable
-fun AudioRow(file: TdApi.File, title: String, durationSec: Int) {
+fun PlayPauseIcon(playing: Boolean, color: Color, iconSize: Dp = 20.dp) {
+    Canvas(Modifier.size(iconSize)) {
+        val w = this.size.width
+        val h = this.size.height
+        if (playing) {
+            val bw = w * 0.28f
+            drawRoundRect(color, Offset(w * 0.14f, h * 0.1f), Size(bw, h * 0.8f), CornerRadius(bw / 3))
+            drawRoundRect(color, Offset(w * 0.58f, h * 0.1f), Size(bw, h * 0.8f), CornerRadius(bw / 3))
+        } else {
+            val p = Path().apply {
+                moveTo(w * 0.25f, h * 0.1f)
+                lineTo(w * 0.92f, h * 0.5f)
+                lineTo(w * 0.25f, h * 0.9f)
+                close()
+            }
+            drawPath(p, color)
+        }
+    }
+}
+
+/** Les messages vocaux Telegram embarquent une forme d'onde en 5 bits par échantillon. */
+private fun decodeWaveform(b: ByteArray): List<Int> {
+    val n = b.size * 8 / 5
+    return (0 until n).map { i ->
+        val bit = i * 5
+        val idx = bit / 8
+        val shift = bit % 8
+        var v = (b[idx].toInt() and 0xFF) shr shift
+        if (shift > 3 && idx + 1 < b.size) v = v or ((b[idx + 1].toInt() and 0xFF) shl (8 - shift))
+        v and 31
+    }
+}
+
+@Composable
+private fun Waveform(samples: List<Int>, progress: Float, active: Color, inactive: Color, onSeek: (Float) -> Unit) {
+    val bars = 38
+    val data = remember(samples) {
+        if (samples.isEmpty()) List(bars) { 8f }
+        else (0 until bars).map { i ->
+            val from = i * samples.size / bars
+            val to = maxOf(from + 1, (i + 1) * samples.size / bars).coerceAtMost(samples.size)
+            samples.subList(minOf(from, samples.size - 1), to).average().toFloat()
+        }
+    }
+    Canvas(
+        Modifier.fillMaxWidth().height(34.dp).pointerInput(Unit) {
+            detectTapGestures { off -> onSeek((off.x / size.width).coerceIn(0f, 1f)) }
+        }
+    ) {
+        val gap = 3.dp.toPx()
+        val bw = (this.size.width - gap * (bars - 1)) / bars
+        data.forEachIndexed { i, v ->
+            val h = (v / 31f).coerceIn(0.14f, 1f) * this.size.height
+            drawRoundRect(
+                if (i.toFloat() / bars < progress) active else inactive,
+                Offset(i * (bw + gap), (this.size.height - h) / 2),
+                Size(bw, h),
+                CornerRadius(bw / 2),
+            )
+        }
+    }
+}
+
+/**
+ * Lecteur audio de conversation. Musique : pochette, titre, artiste, curseur. Message vocal : forme d'onde touchable.
+ * Les couleurs s'adaptent à la bulle (envoyée = fond bleu, reçue = fond sombre/clair).
+ */
+@Composable
+fun AudioRow(
+    file: TdApi.File,
+    title: String,
+    durationSec: Int,
+    outgoing: Boolean = false,
+    performer: String = "",
+    cover: TdApi.Thumbnail? = null,
+    waveform: ByteArray? = null,
+) {
     val app = LocalApp.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -212,53 +298,93 @@ fun AudioRow(file: TdApi.File, title: String, durationSec: Int) {
     var pos by remember { mutableStateOf(0f) }
     var dragging by remember { mutableStateOf(false) }
 
+    val onColor = if (outgoing) Color.White else MaterialTheme.colorScheme.onSurface
+    val accent = if (outgoing) Color.White else Accent
+    val buttonBg = if (outgoing) Color.White else Accent
+    val buttonFg = if (outgoing) Accent else Color.White
+
     LaunchedEffect(playing, dragging) {
         while (playing && !dragging) { pos = AudioController.fraction(); delay(250) }
         if (!mine) pos = 0f
     }
 
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier.size(44.dp).clip(CircleShape).background(Accent).clickable {
-                when {
-                    playing -> AudioController.pause()
-                    mine -> AudioController.resume()
-                    !busy -> scope.launch {
-                        busy = true
-                        try {
-                            val d = app.tg.download(file.id)
-                            val p = d.local.path
-                            if (!d.local.isDownloadingCompleted || p.isNullOrEmpty()) toast(ctx, "Téléchargement incomplet")
-                            else AudioController.play(p, file.id)
-                        } catch (e: Exception) {
-                            toast(ctx, "Lecture impossible : " + e.message)
-                        }
-                        busy = false
-                    }
+    fun toggle() {
+        when {
+            playing -> AudioController.pause()
+            mine -> AudioController.resume()
+            !busy -> scope.launch {
+                busy = true
+                try {
+                    val d = app.tg.download(file.id)
+                    val p = d.local.path
+                    if (!d.local.isDownloadingCompleted || p.isNullOrEmpty()) toast(ctx, "Téléchargement incomplet")
+                    else AudioController.play(p, file.id)
+                } catch (e: Exception) {
+                    toast(ctx, "Lecture impossible : " + e.message)
                 }
-            },
+                busy = false
+            }
+        }
+    }
+
+    Row(Modifier.fillMaxWidth().widthIn(min = 250.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(52.dp).clip(if (cover != null) RoundedCornerShape(12.dp) else CircleShape)
+                .background(buttonBg).clickable { toggle() },
             contentAlignment = Alignment.Center,
         ) {
-            if (busy) CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
-            else Text(if (playing) "⏸" else "▶", color = Color.White, style = MaterialTheme.typography.titleMedium)
+            if (cover != null) ImageFromFile(cover.file, "image/jpeg", onClick = { toggle() })
+            Box(
+                Modifier.size(34.dp).clip(CircleShape).background(if (cover != null) Color(0x99000000) else Color.Transparent),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (busy) CircularProgressIndicator(Modifier.size(20.dp), color = if (cover != null) Color.White else buttonFg, strokeWidth = 2.dp)
+                else PlayPauseIcon(playing, if (cover != null) Color.White else buttonFg, 20.dp)
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, color = onColor, style = MaterialTheme.typography.titleSmall)
+            if (performer.isNotBlank()) {
+                Text(performer, maxLines = 1, overflow = TextOverflow.Ellipsis, color = onColor.copy(alpha = 0.75f), style = MaterialTheme.typography.labelMedium)
+            }
+            if (waveform != null && waveform.isNotEmpty()) {
+                Waveform(
+                    decodeWaveform(waveform), if (mine) pos else 0f, accent, accent.copy(alpha = 0.35f),
+                    onSeek = { f -> if (mine) { AudioController.seekTo(f); pos = f } },
+                )
+            } else {
+                Slider(
+                    value = if (mine) pos else 0f,
+                    onValueChange = { pos = it; dragging = true },
+                    onValueChangeFinished = { AudioController.seekTo(pos); dragging = false },
+                    enabled = mine,
+                    colors = SliderDefaults.colors(
+                        thumbColor = accent,
+                        activeTrackColor = accent,
+                        inactiveTrackColor = accent.copy(alpha = 0.3f),
+                        disabledThumbColor = accent.copy(alpha = 0.55f),
+                        disabledActiveTrackColor = accent.copy(alpha = 0.55f),
+                        disabledInactiveTrackColor = accent.copy(alpha = 0.3f),
+                    ),
+                    modifier = Modifier.height(28.dp),
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    (if (mine) fmtDuration((pos * durationSec).toInt()) + " / " else "") + fmtDuration(durationSec),
+                    color = onColor.copy(alpha = 0.85f), style = MaterialTheme.typography.labelSmall,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(fmtSize(maxOf(file.size, file.expectedSize)), color = onColor.copy(alpha = 0.65f), style = MaterialTheme.typography.labelSmall)
+            }
         }
         Spacer(Modifier.width(8.dp))
-        Column(Modifier.width(190.dp)) {
-            Text(title, maxLines = 1, style = MaterialTheme.typography.bodyMedium)
-            Slider(
-                value = if (mine) pos else 0f,
-                onValueChange = { pos = it; dragging = true },
-                onValueChangeFinished = { AudioController.seekTo(pos); dragging = false },
-                enabled = mine,
-                modifier = Modifier.height(24.dp),
-            )
-            Text(
-                (if (mine) fmtDuration((pos * durationSec).toInt()) + " / " else "") + fmtDuration(durationSec) + " · " + fmtSize(maxOf(file.size, file.expectedSize)),
-                style = MaterialTheme.typography.labelSmall,
-            )
-        }
-        TextButton(onClick = { AudioController.cycleSpeed() }, contentPadding = PaddingValues(horizontal = 6.dp)) {
-            Text(if (speed == 1f) "1×" else if (speed == 1.5f) "1,5×" else "2×")
+        Box(
+            Modifier.clip(RoundedCornerShape(14.dp)).border(1.dp, onColor.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
+                .clickable { AudioController.cycleSpeed() }.padding(horizontal = 8.dp, vertical = 4.dp),
+        ) {
+            Text(if (speed == 1f) "1×" else if (speed == 1.5f) "1,5×" else "2×", color = onColor, style = MaterialTheme.typography.labelMedium)
         }
     }
 }

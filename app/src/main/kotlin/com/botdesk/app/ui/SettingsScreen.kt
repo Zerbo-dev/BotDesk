@@ -64,6 +64,16 @@ fun SettingsScreen(activity: FragmentActivity) {
     val indexed by app.index.items.collectAsState()
     val storage by produceState<Long?>(null, storageTick) { value = try { app.tg.storageBytes() } catch (e: Exception) { null } }
 
+    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            try {
+                ctx.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            } catch (e: Exception) { }
+            app.store.update { it.copy(downloadDir = uri.toString()) }
+            toast(ctx, "Dossier choisi : " + DownloadDir.label(uri.toString()))
+        }
+    }
+
     val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (!ok) toast(ctx, "Notifications refusées : activez-les dans les réglages Android de BotDesk.")
     }
@@ -78,7 +88,7 @@ fun SettingsScreen(activity: FragmentActivity) {
         exportPwd = null
         if (uri != null && pwd != null) scope.launch {
             try {
-                val data = ConfigBackup.encrypt(app.store.config.value.toJson().toString(), pwd.toCharArray())
+                val data = ConfigBackup.encrypt(app.store.config.value.toJson(forExport = true).toString(), pwd.toCharArray())
                 withContext(Dispatchers.IO) { ctx.contentResolver.openOutputStream(uri)?.use { it.write(data) } }
                 toast(ctx, "Configuration exportée (chiffrée)")
             } catch (e: Exception) { toast(ctx, "Export impossible : " + e.message) }
@@ -280,6 +290,34 @@ fun SettingsScreen(activity: FragmentActivity) {
 
         item { SectionTitle("Stockage et téléchargements") }
         item { AppCard(Modifier.fillMaxWidth()) {
+            Text("Dossier d'enregistrement des fichiers", style = MaterialTheme.typography.titleSmall)
+            Text(DownloadDir.label(cfg.downloadDir), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row {
+                TextButton(onClick = { app.lock.skipNextLock = true; folderPicker.launch(null) }) {
+                    Text(if (cfg.downloadDir.isBlank()) "Choisir le dossier" else "Changer de dossier")
+                }
+                if (cfg.downloadDir.isNotBlank()) {
+                    TextButton(onClick = {
+                        try {
+                            ctx.contentResolver.releasePersistableUriPermission(Uri.parse(cfg.downloadDir), Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                        } catch (e: Exception) { }
+                        app.store.update { it.copy(downloadDir = "") }
+                    }) { Text("Retirer") }
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Demander l'emplacement à chaque fichier", Modifier.weight(1f))
+                Switch(cfg.askEachTime, { on -> app.store.update { it.copy(askEachTime = on) } })
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Un sous-dossier par bot ou dépôt", Modifier.weight(1f))
+                Switch(cfg.subfolderPerSource, { on -> app.store.update { it.copy(subfolderPerSource = on) } })
+            }
+            Text(
+                "Les fichiers sont copiés tels quels, sans modification. Le cache ci-dessous est un espace interne de l'app, distinct de ce dossier.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
+            )
             Text("Cache de fichiers : " + (storage?.let { fmtSize(it) } ?: "—"))
             Text("Confirmer avant de télécharger un fichier de plus de :", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
             ChipRow(listOf("0" to "Jamais", "50" to "50 Mo", "100" to "100 Mo", "500" to "500 Mo"), cfg.confirmDownloadMb.toString()) { v ->
@@ -360,7 +398,7 @@ fun SettingsScreen(activity: FragmentActivity) {
             onOk = { pwd ->
                 try {
                     val json = ConfigBackup.decrypt(importBytes ?: ByteArray(0), pwd.toCharArray())
-                    app.store.replace(AppConfig.fromJson(JSONObject(json)))
+                    app.store.replace(AppConfig.fromJson(JSONObject(json)).copy(downloadDir = app.store.config.value.downloadDir))
                     dlg = Dlg.None; importBytes = null
                     toast(ctx, "Configuration importée")
                 } catch (e: Exception) { toast(ctx, "Mot de passe ou fichier invalide") }

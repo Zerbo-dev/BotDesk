@@ -50,8 +50,19 @@ data class AppConfig(
     val ttsRate: Float = 1f,
     val ttsPitch: Float = 1f,
     val elevenVoiceId: String = "",
+    /** URI du dossier d'enregistrement choisi (accès par dossier Android). Jamais exporté. */
+    val downloadDir: String = "",
+    val askEachTime: Boolean = false,
+    val subfolderPerSource: Boolean = false,
+    /** Mode survol : durée d'un extrait (s), nombre d'extraits, tirage aléatoire ou réparti. */
+    val skipSegSec: Int = 10,
+    val skipExtracts: Int = 5,
+    val skipRandom: Boolean = true,
+    /** Lecture automatique : durée d'une photo (s) et reprise en boucle. */
+    val autoPhotoSec: Int = 5,
+    val autoLoop: Boolean = false,
 ) {
-    fun toJson(): JSONObject = JSONObject().apply {
+    fun toJson(forExport: Boolean = false): JSONObject = JSONObject().apply {
         put("app", "botdesk")
         put("version", 2)
         put("categories", JSONArray().also { a ->
@@ -89,6 +100,14 @@ data class AppConfig(
         put("ttsRate", ttsRate.toDouble())
         put("ttsPitch", ttsPitch.toDouble())
         put("elevenVoiceId", elevenVoiceId)
+        put("askEachTime", askEachTime)
+        put("skipSegSec", skipSegSec)
+        put("skipExtracts", skipExtracts)
+        put("skipRandom", skipRandom)
+        put("autoPhotoSec", autoPhotoSec)
+        put("autoLoop", autoLoop)
+        put("subfolderPerSource", subfolderPerSource)
+        if (!forExport) put("downloadDir", downloadDir)
     }
 
     companion object {
@@ -142,6 +161,14 @@ data class AppConfig(
                 ttsRate = o.optDouble("ttsRate", 1.0).toFloat(),
                 ttsPitch = o.optDouble("ttsPitch", 1.0).toFloat(),
                 elevenVoiceId = o.str("elevenVoiceId") ?: "",
+                downloadDir = o.str("downloadDir") ?: "",
+                askEachTime = o.optBoolean("askEachTime", false),
+                skipSegSec = o.optInt("skipSegSec", 10),
+                skipExtracts = o.optInt("skipExtracts", 5),
+                skipRandom = o.optBoolean("skipRandom", true),
+                autoPhotoSec = o.optInt("autoPhotoSec", 5),
+                autoLoop = o.optBoolean("autoLoop", false),
+                subfolderPerSource = o.optBoolean("subfolderPerSource", false),
             )
         }
     }

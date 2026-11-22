@@ -37,6 +37,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.Dispatchers
@@ -181,17 +182,32 @@ private fun MediaViewer(path: String, audio: Boolean) {
             playWhenReady = true
         }
     }
-    DisposableEffect(exo) { onDispose { exo.release() } }
-    AndroidView(
-        factory = { c ->
-            PlayerView(c).apply {
-                player = exo
-                useController = true
-                if (audio) controllerShowTimeoutMs = 0
+    var durationMs by remember(path) { mutableStateOf(0L) }
+    var survol by remember { mutableStateOf(false) }
+    var label by remember { mutableStateOf("") }
+    DisposableEffect(exo) {
+        val l = object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_READY) durationMs = exo.duration.coerceAtLeast(0L)
             }
-        },
-        modifier = Modifier.fillMaxSize().background(Color.Black),
-    )
+        }
+        exo.addListener(l)
+        onDispose { exo.removeListener(l); exo.release() }
+    }
+    SurvolEffect(exo, durationMs, survol, path, { label = it }) { exo.pause(); label = "Aperçu terminé" }
+    Column(Modifier.fillMaxSize()) {
+        AndroidView(
+            factory = { c ->
+                PlayerView(c).apply {
+                    player = exo
+                    useController = true
+                    if (audio) controllerShowTimeoutMs = 0
+                }
+            },
+            modifier = Modifier.weight(1f).fillMaxWidth().background(Color.Black),
+        )
+        SkipBar(exo, durationMs, survol, { survol = it }, label)
+    }
 }
 
 // ---------- PDF ----------

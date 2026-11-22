@@ -43,7 +43,13 @@ import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 
 @Composable
-fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFiles: (() -> Unit)? = null) {
+fun ChatScreen(
+    chatId: Long,
+    onBack: () -> Unit,
+    readOnly: Boolean = false,
+    onFiles: (() -> Unit)? = null,
+    onAutoPlay: ((Boolean, Long?) -> Unit)? = null,
+) {
     val app = LocalApp.current
     val tg = app.tg
     val ctx = LocalContext.current
@@ -70,6 +76,7 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
     var confirm by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
     var commands by remember(chatId) { mutableStateOf<List<Pair<String, String>>?>(null) }
     var showCommands by remember { mutableStateOf(false) }
+    var autoMenu by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     fun loadMore() {
@@ -353,7 +360,20 @@ fun ChatScreen(chatId: Long, onBack: () -> Unit, readOnly: Boolean = false, onFi
                 }
             },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") } },
-            actions = { onFiles?.let { f -> TextButton(onClick = f) { Text("Fichiers") } } },
+            actions = {
+                if (onAutoPlay != null) {
+                    Box {
+                        TextButton(onClick = { autoMenu = true }) { Text("▶ Auto") }
+                        DropdownMenu(autoMenu, { autoMenu = false }) {
+                            DropdownMenuItem(text = { Text("Du plus ancien au plus récent") }, onClick = { autoMenu = false; onAutoPlay(true, null) })
+                            DropdownMenuItem(text = { Text("Du plus récent au plus ancien") }, onClick = { autoMenu = false; onAutoPlay(false, null) })
+                            DropdownMenuItem(text = { Text("À partir d'ici, vers les plus récents") }, onClick = { autoMenu = false; onAutoPlay(true, msgs.getOrNull(listState.firstVisibleItemIndex)?.id) })
+                            DropdownMenuItem(text = { Text("À partir d'ici, vers les plus anciens") }, onClick = { autoMenu = false; onAutoPlay(false, msgs.getOrNull(listState.firstVisibleItemIndex)?.id) })
+                        }
+                    }
+                }
+                onFiles?.let { f -> TextButton(onClick = f) { Text("Fichiers") } }
+            },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
         )
 
@@ -550,8 +570,11 @@ private fun Bubble(
         ) {
             when (val c = m.content) {
                 is TdApi.MessagePhoto -> PhotoView(c.photo)
-                is TdApi.MessageAudio -> AudioRow(c.audio.audio, c.audio.title.ifBlank { c.audio.fileName }.ifBlank { "Audio" }, c.audio.duration)
-                is TdApi.MessageVoiceNote -> AudioRow(c.voiceNote.voice, "Message vocal", c.voiceNote.duration)
+                is TdApi.MessageAudio -> AudioRow(
+                    c.audio.audio, c.audio.title.ifBlank { c.audio.fileName }.ifBlank { "Audio" }, c.audio.duration,
+                    outgoing = out, performer = c.audio.performer, cover = c.audio.albumCoverThumbnail,
+                )
+                is TdApi.MessageVoiceNote -> AudioRow(c.voiceNote.voice, "Message vocal", c.voiceNote.duration, outgoing = out, waveform = c.voiceNote.waveform)
                 is TdApi.MessageVideo -> VideoRow(c.video)
                 is TdApi.MessageDocument -> DocumentRow(c.document) { onSave(c.document) }
                 else -> Unit
