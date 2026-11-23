@@ -61,6 +61,9 @@ class Telegram(
 
     val myName = MutableStateFlow<String?>(null)
 
+    /** Progression (0..1) des téléchargements en cours, par identifiant de fichier. */
+    val downloads = MutableStateFlow<Map<Int, Float>>(emptyMap())
+
     private val missingUsers = ConcurrentHashMap.newKeySet<Long>()
     private val chats = ConcurrentHashMap<Long, TdApi.Chat>()
     private val users = ConcurrentHashMap<Long, TdApi.User>()
@@ -104,6 +107,15 @@ class Telegram(
             }
             is TdApi.UpdateChatTitle -> { chats[o.chatId]?.title = o.title; bump() }
             is TdApi.UpdateUser -> { users[o.user.id] = o.user; bump() }
+            is TdApi.UpdateFile -> {
+                val f = o.file
+                val total = maxOf(f.size, f.expectedSize)
+                if (total > 0) {
+                    val p = (f.local.downloadedSize.toFloat() / total).coerceIn(0f, 1f)
+                    val old = downloads.value[f.id]
+                    if (old == null || kotlin.math.abs(p - old) >= 0.01f || p >= 1f) downloads.update { it + (f.id to p) }
+                }
+            }
             is TdApi.UpdateChatPhoto -> { chats[o.chatId]?.photo = o.photo; bump() }
             is TdApi.UpdateNewMessage,
             is TdApi.UpdateMessageContent,

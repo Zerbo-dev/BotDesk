@@ -10,6 +10,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -78,6 +80,7 @@ private fun Shell(activity: FragmentActivity) {
     var channelId by remember { mutableStateOf<Long?>(null) }
     var showHistory by remember { mutableStateOf(false) }
     var autoPlay by remember { mutableStateOf<AutoPlayRequest?>(null) }
+    var showPlayer by remember { mutableStateOf(false) }
 
     // Ouverture depuis une notification
     val pending by app.pendingChat.collectAsState()
@@ -95,6 +98,9 @@ private fun Shell(activity: FragmentActivity) {
     val viewer by app.viewer.collectAsState()
     BackHandler(enabled = viewer != null) { app.viewer.value = null }
     BackHandler(enabled = autoPlay != null && viewer == null) { autoPlay = null }
+    val gallery by app.gallery.collectAsState()
+    BackHandler(enabled = gallery != null) { app.gallery.value = null }
+    BackHandler(enabled = showPlayer) { showPlayer = false }
 
     val openSource: (Long) -> Unit = { id ->
         val chat = app.tg.chat(id)
@@ -106,6 +112,9 @@ private fun Shell(activity: FragmentActivity) {
     val ch = channelId
     val v = viewer
     Box(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize()) {
+    MiniPlayer { showPlayer = true }
+    Box(Modifier.weight(1f)) {
     if (c != null) {
         ChatScreen(c, onBack = { chatId = null }, onAutoPlay = { fwd, start -> autoPlay = AutoPlayRequest(c, fwd, start) })
     } else if (ch != null) {
@@ -143,6 +152,8 @@ private fun Shell(activity: FragmentActivity) {
             }
         }
     }
+    }
+    }
     // Le lecteur s'affiche PAR-DESSUS : l'écran dessous reste composé, donc on retrouve la même position au retour.
     if (v != null) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) { ViewerScreen(v) { app.viewer.value = null } }
@@ -150,6 +161,13 @@ private fun Shell(activity: FragmentActivity) {
     val ap = autoPlay
     if (ap != null && v == null) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) { AutoPlayScreen(ap) { autoPlay = null } }
+    }
+    val gal = gallery
+    if (gal != null && v == null) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) { GalleryScreen(gal) { app.gallery.value = null } }
+    }
+    if (showPlayer) {
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) { NowPlayingScreen { showPlayer = false } }
     }
     }
 }

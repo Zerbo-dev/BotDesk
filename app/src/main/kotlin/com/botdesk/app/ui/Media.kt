@@ -7,6 +7,11 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.media.MediaPlayer
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
+import android.widget.Toast
+import kotlin.random.Random
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
@@ -48,34 +53,156 @@ import java.io.File
 
 fun fmtDuration(sec: Int): String = String.format("%d:%02d", sec / 60, sec % 60)
 
-/** Lecteur audio unique : lancer un son arrête le précédent. Vitesse 1× / 1,5× / 2× et recherche dans la piste. */
+/** Un morceau de la file de lecture (audios et messages vocaux d'une conversation). */
+data class QueueItem(
+    val msgId: Long,
+    val file: TdApi.File,
+    val title: String,
+    val subtitle: String,
+    val cover: TdApi.File?,
+    val durationSec: Int,
+)
+
+fun toQueueItem(m: TdApi.Message): QueueItem? = when (val c = m.content) {
+    is TdApi.MessageAudio -> QueueItem(
+        m.id, c.audio.audio, c.audio.title.ifBlank { c.audio.fileName }.ifBlank { "Audio" },
+        c.audio.performer, c.audio.albumCoverThumbnail?.file, c.audio.duration,
+    )
+    is TdApi.MessageVoiceNote -> QueueItem(m.id, c.voiceNote.voice, "Message vocal", "", null, c.voiceNote.duration)
+    else -> null
+}
+
+val LocalAudioQueue = staticCompositionLocalOf<List<QueueItem>> { emptyList() }
+
+/** Ouvre la galerie sur un message (photo/vidéo) ; fourni par la conversation. */
+val LocalMediaOpener = staticCompositionLocalOf<((Long) -> Unit)?> { null }
+
+/**
+ * Lecteur audio global : continue quand on quitte la conversation (et écran éteint), enchaîne les morceaux
+ * de la conversation, avec répétition, aléatoire, ordre inversé, vitesse et recherche dans la piste.
+ */
 object AudioController {
     private var mp: MediaPlayer? = null
+    private var app: com.botdesk.app.AppContainer? = null
+    private var queue: List<QueueItem> = emptyList()
+    private var token = 0L
+    private val main = Handler(Looper.getMainLooper())
 
     /** (identifiant du fichier en cours, en lecture ?) */
     val state = MutableStateFlow(0 to false)
     val speed = MutableStateFlow(1f)
+    val now = MutableStateFlow<QueueItem?>(null)
+    val loadingId = MutableStateFlow(0)
+    /** 0 = aucune, 1 = ce morceau, 2 = toute la liste */
+    val repeat = MutableStateFlow(0)
+    val shuffle = MutableStateFlow(false)
+    val reverse = MutableStateFlow(false)
+
+    fun bind(a: com.botdesk.app.AppContainer) { app = a }
+
+    private fun say(msg: String) {
+        val a = app ?: return
+        main.post { Toast.makeText(a.app, msg, Toast.LENGTH_LONG).show() }
+    }
 
     private fun applySpeed() {
         val p = mp ?: return
         try { p.playbackParams = p.playbackParams.setSpeed(speed.value) } catch (e: Exception) { }
     }
 
-    fun play(path: String, fileId: Int) {
-        stop()
-        Speaker.stop()
-        val p = MediaPlayer()
-        p.setDataSource(path)
-        p.setOnCompletionListener {
-            state.value = 0 to false
-            it.release()
-            if (mp === it) mp = null
+    /** Démarre un morceau (le télécharge si besoin) et mémorise la file pour enchaîner automatiquement. */
+    fun start(item: QueueItem, newQueue: List<QueueItem>) {
+        val a = app ?: return
+        queue = if (newQueue.any { it.file.id == item.file.id }) newQueue else listOf(item)
+        now.value = item
+        loadingId.value = item.file.id
+        val t = ++token
+        a.scope.launch {
+            try {
+                val d = a.tg.download(item.file.id)
+                val p = d.local.path
+                if (t != token) return@launch
+                if (!d.local.isDownloadingCompleted || p.isNullOrEmpty()) {
+                    say("Téléchargement incomplet")
+                    loadingId.value = 0
+                    return@launch
+                }
+                withContext(Dispatchers.Main) { if (t == token) play(p, item.file.id) }
+            } catch (e: Exception) {
+                say("Lecture impossible : " + e.message)
+                if (t == token) loadingId.value = 0
+            }
         }
-        p.prepare()
-        p.start()
-        mp = p
-        applySpeed()
-        state.value = fileId to true
+    }
+
+    private fun play(path: String, fileId: Int) {
+        releasePlayer()
+        Speaker.stop()
+        try {
+            val p = MediaPlayer()
+            app?.let { p.setWakeMode(it.app, PowerManager.PARTIAL_WAKE_LOCK) }
+            p.setDataSource(path)
+            p.setOnCompletionListener { onCompleted(it) }
+            p.setOnErrorListener { _, _, _ -> say("Erreur de lecture"); stop(); true }
+            p.prepare()
+            p.start()
+            mp = p
+            applySpeed()
+            state.value = fileId to true
+        } catch (e: Exception) {
+            say("Lecture impossible : " + e.message)
+            stop()
+        }
+        loadingId.value = 0
+    }
+
+    private fun onCompleted(p: MediaPlayer) {
+        val cur = now.value
+        try { p.release() } catch (e: Exception) { }
+        if (mp !== p) return
+        mp = null
+        state.value = 0 to false
+        if (cur == null) return
+        if (repeat.value == 1) { start(cur, queue); return }
+        val i = queue.indexOfFirst { it.file.id == cur.file.id }
+        nextIndex(i, 1)?.let { start(queue[it], queue) }
+    }
+
+    private fun nextIndex(i: Int, dir: Int): Int? {
+        if (queue.isEmpty()) return null
+        if (shuffle.value && queue.size > 1) {
+            var r: Int
+            do { r = Random.nextInt(queue.size) } while (r == i)
+            return r
+        }
+        val step = if (reverse.value) -dir else dir
+        val n = i + step
+        return when {
+            n in queue.indices -> n
+            repeat.value == 2 -> (n + queue.size) % queue.size
+            else -> null
+        }
+    }
+
+    fun next() {
+        val cur = now.value ?: return
+        nextIndex(queue.indexOfFirst { it.file.id == cur.file.id }, 1)?.let { start(queue[it], queue) }
+    }
+
+    fun previous() {
+        val cur = now.value ?: return
+        val p = mp
+        if (p != null && p.currentPosition > 3000) { seekTo(0f); return }
+        nextIndex(queue.indexOfFirst { it.file.id == cur.file.id }, -1)?.let { start(queue[it], queue) }
+    }
+
+    fun toggle() {
+        val cur = now.value ?: return
+        when {
+            state.value.second -> pause()
+            mp != null -> resume()
+            else -> start(cur, queue)
+        }
     }
 
     fun pause() {
@@ -84,7 +211,8 @@ object AudioController {
     }
 
     fun resume() {
-        mp?.start()
+        val p = mp ?: return
+        p.start()
         applySpeed()
         state.value = state.value.first to true
     }
@@ -105,10 +233,17 @@ object AudioController {
         return if (d > 0) p.currentPosition.toFloat() / d else 0f
     }
 
-    fun stop() {
+    private fun releasePlayer() {
         try { mp?.release() } catch (e: Exception) { }
         mp = null
+    }
+
+    fun stop() {
+        token++
+        loadingId.value = 0
+        releasePlayer()
         state.value = 0 to false
+        now.value = null
     }
 }
 
@@ -203,73 +338,12 @@ fun ImageFromFile(file: TdApi.File, mime: String, onClick: (() -> Unit)? = null)
 }
 
 @Composable
-fun PhotoView(photo: TdApi.Photo) {
+fun PhotoView(photo: TdApi.Photo, msgId: Long = 0L) {
+    val opener = LocalMediaOpener.current
     val sizes = photo.sizes.filterNotNull().sortedBy { it.width }
     val best = sizes.lastOrNull { it.width <= 1280 } ?: sizes.firstOrNull()
-    if (best != null) ImageFromFile(best.photo, "image/jpeg")
-}
-
-@Composable
-fun PlayPauseIcon(playing: Boolean, color: Color, iconSize: Dp = 20.dp) {
-    Canvas(Modifier.size(iconSize)) {
-        val w = this.size.width
-        val h = this.size.height
-        if (playing) {
-            val bw = w * 0.28f
-            drawRoundRect(color, Offset(w * 0.14f, h * 0.1f), Size(bw, h * 0.8f), CornerRadius(bw / 3))
-            drawRoundRect(color, Offset(w * 0.58f, h * 0.1f), Size(bw, h * 0.8f), CornerRadius(bw / 3))
-        } else {
-            val p = Path().apply {
-                moveTo(w * 0.25f, h * 0.1f)
-                lineTo(w * 0.92f, h * 0.5f)
-                lineTo(w * 0.25f, h * 0.9f)
-                close()
-            }
-            drawPath(p, color)
-        }
-    }
-}
-
-/** Les messages vocaux Telegram embarquent une forme d'onde en 5 bits par échantillon. */
-private fun decodeWaveform(b: ByteArray): List<Int> {
-    val n = b.size * 8 / 5
-    return (0 until n).map { i ->
-        val bit = i * 5
-        val idx = bit / 8
-        val shift = bit % 8
-        var v = (b[idx].toInt() and 0xFF) shr shift
-        if (shift > 3 && idx + 1 < b.size) v = v or ((b[idx + 1].toInt() and 0xFF) shl (8 - shift))
-        v and 31
-    }
-}
-
-@Composable
-private fun Waveform(samples: List<Int>, progress: Float, active: Color, inactive: Color, onSeek: (Float) -> Unit) {
-    val bars = 38
-    val data = remember(samples) {
-        if (samples.isEmpty()) List(bars) { 8f }
-        else (0 until bars).map { i ->
-            val from = i * samples.size / bars
-            val to = maxOf(from + 1, (i + 1) * samples.size / bars).coerceAtMost(samples.size)
-            samples.subList(minOf(from, samples.size - 1), to).average().toFloat()
-        }
-    }
-    Canvas(
-        Modifier.fillMaxWidth().height(34.dp).pointerInput(Unit) {
-            detectTapGestures { off -> onSeek((off.x / size.width).coerceIn(0f, 1f)) }
-        }
-    ) {
-        val gap = 3.dp.toPx()
-        val bw = (this.size.width - gap * (bars - 1)) / bars
-        data.forEachIndexed { i, v ->
-            val h = (v / 31f).coerceIn(0.14f, 1f) * this.size.height
-            drawRoundRect(
-                if (i.toFloat() / bars < progress) active else inactive,
-                Offset(i * (bw + gap), (this.size.height - h) / 2),
-                Size(bw, h),
-                CornerRadius(bw / 2),
-            )
-        }
+    if (best != null) {
+        ImageFromFile(best.photo, "image/jpeg", onClick = if (opener != null && msgId != 0L) ({ opener(msgId) }) else null)
     }
 }
 
@@ -294,7 +368,9 @@ fun AudioRow(
     val speed by AudioController.speed.collectAsState()
     val mine = st.first == file.id
     val playing = mine && st.second
-    var busy by remember { mutableStateOf(false) }
+    val loading by AudioController.loadingId.collectAsState()
+    val queue = LocalAudioQueue.current
+    val busy = loading == file.id
     var pos by remember { mutableStateOf(0f) }
     var dragging by remember { mutableStateOf(false) }
 
@@ -310,20 +386,10 @@ fun AudioRow(
 
     fun toggle() {
         when {
+            busy -> Unit
             playing -> AudioController.pause()
             mine -> AudioController.resume()
-            !busy -> scope.launch {
-                busy = true
-                try {
-                    val d = app.tg.download(file.id)
-                    val p = d.local.path
-                    if (!d.local.isDownloadingCompleted || p.isNullOrEmpty()) toast(ctx, "Téléchargement incomplet")
-                    else AudioController.play(p, file.id)
-                } catch (e: Exception) {
-                    toast(ctx, "Lecture impossible : " + e.message)
-                }
-                busy = false
-            }
+            else -> AudioController.start(QueueItem(0L, file, title, performer, cover?.file, durationSec), queue)
         }
     }
 
@@ -391,9 +457,9 @@ fun AudioRow(
 
 /** Aperçu d'une vidéo : vignette Telegram (quelques Ko) + bouton lecture ; la vidéo n'est téléchargée qu'au toucher. */
 @Composable
-fun VideoPreview(video: TdApi.File, thumb: TdApi.Thumbnail?, mime: String, name: String, durationSec: Int) {
+fun VideoPreview(video: TdApi.File, thumb: TdApi.Thumbnail?, mime: String, name: String, durationSec: Int, onOpen: (() -> Unit)? = null) {
     val open = rememberFileOpener()
-    val play = { open(video, mime.ifBlank { "video/mp4" }, name.ifBlank { "Vidéo" }) }
+    val play: () -> Unit = onOpen ?: { open(video, mime.ifBlank { "video/mp4" }, name.ifBlank { "Vidéo" }) }
     Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { play() }) {
         if (thumb != null) {
             ImageFromFile(thumb.file, "image/jpeg", onClick = { play() })
@@ -413,8 +479,9 @@ fun VideoPreview(video: TdApi.File, thumb: TdApi.Thumbnail?, mime: String, name:
 }
 
 @Composable
-fun VideoRow(video: TdApi.Video) {
-    VideoPreview(video.video, video.thumbnail, video.mimeType, video.fileName, video.duration)
+fun VideoRow(video: TdApi.Video, msgId: Long = 0L) {
+    val opener = LocalMediaOpener.current
+    VideoPreview(video.video, video.thumbnail, video.mimeType, video.fileName, video.duration, if (opener != null && msgId != 0L) ({ opener(msgId) }) else null)
 }
 
 @Composable

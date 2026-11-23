@@ -6,6 +6,7 @@ import com.botdesk.app.core.SecureStore
 import com.botdesk.app.data.FileIndex
 import com.botdesk.app.data.LocalStore
 import com.botdesk.app.td.Telegram
+import com.botdesk.app.ui.GalleryRequest
 import com.botdesk.app.ui.ViewerRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,8 +30,12 @@ class AppContainer(val app: Application) {
     /** Fichier ouvert dans un lecteur interne (null = aucun). */
     val viewer = MutableStateFlow<ViewerRequest?>(null)
 
+    /** Galerie photos/vidéos ouverte (balayage gauche/droite). */
+    val gallery = MutableStateFlow<GalleryRequest?>(null)
+
     init {
         com.botdesk.app.ui.Speaker.bind(store, secure)
+        com.botdesk.app.ui.AudioController.bind(this)
         scope.launch {
             tg.msgEvents.collect { e ->
                 if (e is TdApi.UpdateNewMessage) notifier.onMessage(e.message)

@@ -103,7 +103,7 @@ fun ChatScreen(
         loadMore()
     }
     DisposableEffect(chatId) {
-        onDispose { tg.closeChat(chatId); AudioController.stop(); Speaker.stop() }
+        onDispose { tg.closeChat(chatId); Speaker.stop() }
     }
     LaunchedEffect(chatId) {
         val uid = tg.chat(chatId)?.let { tg.botUserId(it) }
@@ -336,6 +336,13 @@ fun ChatScreen(
         if (containsAny(b.text, cfg.sensitiveKeywords)) confirm = ("Bouton : " + b.text) to run else run()
     }
 
+    val audioQueue = remember(msgs) { msgs.mapNotNull { toQueueItem(it) }.sortedBy { it.msgId } }
+    val openMedia: (Long) -> Unit = { id ->
+        val gallery = msgs.mapNotNull { toGalleryItem(it) }.sortedBy { it.msgId }
+        val idx = gallery.indexOfFirst { it.msgId == id }
+        if (idx >= 0) app.gallery.value = GalleryRequest(chatId, gallery, idx)
+    }
+
     fun togglePin(cmd: String) {
         val meta = app.store.config.value.bots[chatId] ?: BotMeta()
         val pins = if (cmd in meta.pinnedCommands) meta.pinnedCommands - cmd else meta.pinnedCommands + cmd
@@ -386,6 +393,7 @@ fun ChatScreen(
                 val older = msgs.getOrNull(i + 1)
                 Column {
                     if (older == null || dayKey(older.date) != dayKey(m.date)) DayChip(m.date)
+                    CompositionLocalProvider(LocalAudioQueue provides audioQueue, LocalMediaOpener provides openMedia) {
                     Bubble(
                         m,
                         speaking = speakingId == m.id,
@@ -396,6 +404,7 @@ fun ChatScreen(
                         onSave = { d -> save(BackupFile(m.id, chatId, m.date, d, "", "")) },
                         onInline = { b -> onInline(m, b) },
                     )
+                    }
                 }
             }
             if (loading) item { Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(20.dp)) } }
@@ -569,13 +578,13 @@ private fun Bubble(
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
             when (val c = m.content) {
-                is TdApi.MessagePhoto -> PhotoView(c.photo)
+                is TdApi.MessagePhoto -> PhotoView(c.photo, m.id)
                 is TdApi.MessageAudio -> AudioRow(
                     c.audio.audio, c.audio.title.ifBlank { c.audio.fileName }.ifBlank { "Audio" }, c.audio.duration,
                     outgoing = out, performer = c.audio.performer, cover = c.audio.albumCoverThumbnail,
                 )
                 is TdApi.MessageVoiceNote -> AudioRow(c.voiceNote.voice, "Message vocal", c.voiceNote.duration, outgoing = out, waveform = c.voiceNote.waveform)
-                is TdApi.MessageVideo -> VideoRow(c.video)
+                is TdApi.MessageVideo -> VideoRow(c.video, m.id)
                 is TdApi.MessageDocument -> DocumentRow(c.document) { onSave(c.document) }
                 else -> Unit
             }

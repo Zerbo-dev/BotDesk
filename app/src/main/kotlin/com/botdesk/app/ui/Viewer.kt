@@ -10,7 +10,11 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -95,6 +99,7 @@ private data class Loaded(val path: String?, val kind: Kind?, val done: Boolean)
 fun ViewerScreen(req: ViewerRequest, onClose: () -> Unit) {
     val app = LocalApp.current
     val ctx = LocalContext.current
+    val progress by app.tg.downloads.collectAsState()
     val loaded by produceState(Loaded(null, null, false), req.file.id) {
         val p = try {
             val d = app.tg.download(req.file.id)
@@ -116,7 +121,7 @@ fun ViewerScreen(req: ViewerRequest, onClose: () -> Unit) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 !loaded.done -> Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    CircularProgressIndicator(); Spacer(Modifier.height(12.dp)); Text("Téléchargement…")
+                    ProgressRing(progress[req.file.id]); Spacer(Modifier.height(12.dp)); Text("Téléchargement…")
                 }
                 path == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Téléchargement impossible.", color = MaterialTheme.colorScheme.error) }
                 else -> when (loaded.kind) {
@@ -140,16 +145,32 @@ fun ViewerScreen(req: ViewerRequest, onClose: () -> Unit) {
 // ---------- Image avec zoom ----------
 
 @Composable
-fun ZoomableImage(bitmap: ImageBitmap) {
+fun ZoomableImage(bitmap: ImageBitmap, onTap: (() -> Unit)? = null) {
     var scale by remember { mutableStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     Box(
         Modifier.fillMaxSize()
-            .pointerInput(Unit) { detectTapGestures(onDoubleTap = { scale = 1f; offset = Offset.Zero }) }
             .pointerInput(Unit) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(1f, 8f)
-                    offset = if (scale <= 1f) Offset.Zero else offset + pan
+                detectTapGestures(
+                    onDoubleTap = { if (scale > 1f) { scale = 1f; offset = Offset.Zero } else scale = 2.5f },
+                    onTap = { onTap?.invoke() },
+                )
+            }
+            .pointerInput(Unit) {
+                // Ne capte les gestes que pour zoomer (2 doigts) ou déplacer une image déjà zoomée :
+                // sinon le balayage gauche/droite reste libre pour changer de média.
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    do {
+                        val event = awaitPointerEvent()
+                        val zoom = event.calculateZoom()
+                        val pan = event.calculatePan()
+                        if (event.changes.size > 1 || scale > 1f) {
+                            scale = (scale * zoom).coerceIn(1f, 8f)
+                            offset = if (scale <= 1f) Offset.Zero else offset + pan
+                            event.changes.forEach { if (it.positionChanged()) it.consume() }
+                        }
+                    } while (event.changes.any { it.pressed })
                 }
             },
     ) {
