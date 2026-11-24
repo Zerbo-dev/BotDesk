@@ -347,6 +347,70 @@ fun PhotoView(photo: TdApi.Photo, msgId: Long = 0L) {
     }
 }
 
+@Composable
+fun PlayPauseIcon(playing: Boolean, color: Color, iconSize: Dp = 20.dp) {
+    Canvas(Modifier.size(iconSize)) {
+        val w = this.size.width
+        val h = this.size.height
+        if (playing) {
+            val bw = w * 0.28f
+            drawRoundRect(color, Offset(w * 0.14f, h * 0.1f), Size(bw, h * 0.8f), CornerRadius(bw / 3))
+            drawRoundRect(color, Offset(w * 0.58f, h * 0.1f), Size(bw, h * 0.8f), CornerRadius(bw / 3))
+        } else {
+            val p = Path().apply {
+                moveTo(w * 0.25f, h * 0.1f)
+                lineTo(w * 0.92f, h * 0.5f)
+                lineTo(w * 0.25f, h * 0.9f)
+                close()
+            }
+            drawPath(p, color)
+        }
+    }
+}
+
+/** Les messages vocaux Telegram embarquent une forme d'onde en 5 bits par échantillon. */
+private fun decodeWaveform(b: ByteArray): List<Int> {
+    val n = b.size * 8 / 5
+    return (0 until n).map { i ->
+        val bit = i * 5
+        val idx = bit / 8
+        val shift = bit % 8
+        var v = (b[idx].toInt() and 0xFF) shr shift
+        if (shift > 3 && idx + 1 < b.size) v = v or ((b[idx + 1].toInt() and 0xFF) shl (8 - shift))
+        v and 31
+    }
+}
+
+@Composable
+private fun Waveform(samples: List<Int>, progress: Float, active: Color, inactive: Color, onSeek: (Float) -> Unit) {
+    val bars = 38
+    val data = remember(samples) {
+        if (samples.isEmpty()) List(bars) { 8f }
+        else (0 until bars).map { i ->
+            val from = i * samples.size / bars
+            val to = maxOf(from + 1, (i + 1) * samples.size / bars).coerceAtMost(samples.size)
+            samples.subList(minOf(from, samples.size - 1), to).average().toFloat()
+        }
+    }
+    Canvas(
+        Modifier.fillMaxWidth().height(34.dp).pointerInput(Unit) {
+            detectTapGestures { off -> onSeek((off.x / size.width).coerceIn(0f, 1f)) }
+        }
+    ) {
+        val gap = 3.dp.toPx()
+        val bw = (this.size.width - gap * (bars - 1)) / bars
+        data.forEachIndexed { i, v ->
+            val h = (v / 31f).coerceIn(0.14f, 1f) * this.size.height
+            drawRoundRect(
+                if (i.toFloat() / bars < progress) active else inactive,
+                Offset(i * (bw + gap), (this.size.height - h) / 2),
+                Size(bw, h),
+                CornerRadius(bw / 2),
+            )
+        }
+    }
+}
+
 /**
  * Lecteur audio de conversation. Musique : pochette, titre, artiste, curseur. Message vocal : forme d'onde touchable.
  * Les couleurs s'adaptent à la bulle (envoyée = fond bleu, reçue = fond sombre/clair).
