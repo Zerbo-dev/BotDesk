@@ -15,6 +15,7 @@ import com.botdesk.app.core.LockManager
 import com.botdesk.app.data.LocalStore
 import com.botdesk.app.td.Msg
 import com.botdesk.app.td.Telegram
+import com.botdesk.app.ui.AudioController
 import com.botdesk.app.ui.containsAny
 import org.drinkless.tdlib.TdApi
 
@@ -33,13 +34,15 @@ class Notifier(
         const val CH_MSG = "messages"
         const val CH_ALERT = "alerts"
         const val CH_SERVICE = "service"
+        const val CH_CONNECTION = "connection"
     }
 
     init {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CH_MSG, "Messages des bots", NotificationManager.IMPORTANCE_DEFAULT))
         nm.createNotificationChannel(NotificationChannel(CH_ALERT, "Alertes", NotificationManager.IMPORTANCE_HIGH))
-        nm.createNotificationChannel(NotificationChannel(CH_SERVICE, "Connexion en arrière-plan", NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(NotificationChannel(CH_SERVICE, "Lecture audio", NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(NotificationChannel(CH_CONNECTION, "Connexion en arrière-plan (discrète)", NotificationManager.IMPORTANCE_MIN))
     }
 
     fun onMessage(m: TdApi.Message) {
@@ -130,22 +133,35 @@ class Notifier(
         )
     }
 
+    private fun servicePending(action: String, code: Int): PendingIntent =
+        PendingIntent.getService(ctx, code, Intent(ctx, TdService::class.java).setAction(action), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+    /** Notification du service : titre du morceau + commandes pendant une lecture, sinon une ligne discrète. */
     fun serviceNotification(): Notification {
         val intent = Intent(ctx, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP }
         val pi = PendingIntent.getActivity(ctx, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        return NotificationCompat.Builder(ctx, CH_SERVICE)
+        val now = AudioController.now.value
+        val playing = AudioController.state.value.second
+        val b = NotificationCompat.Builder(ctx, if (now != null) CH_SERVICE else CH_CONNECTION)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("BotDesk")
-            .setContentText("Connexion Telegram active")
             .setContentIntent(pi)
             .setOngoing(true)
-            .build()
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+        if (now != null) {
+            b.setContentTitle(now.title).setContentText(now.subtitle.ifBlank { "BotDesk" })
+            b.addAction(0, if (playing) "Pause" else "Lecture", servicePending(TdService.ACTION_TOGGLE, 1))
+            b.addAction(0, "Fermer", servicePending(TdService.ACTION_STOP, 2))
+        } else {
+            b.setContentTitle("BotDesk").setContentText("Connexion Telegram active")
+        }
+        return b.build()
     }
 
     /** Démarre ou arrête le service selon le réglage. À appeler quand l'app est au premier plan. */
     fun syncService() {
         val i = Intent(ctx, TdService::class.java)
-        if (store.config.value.backgroundService) {
+        if (store.config.value.backgroundService || AudioController.now.value != null) {
             try { ContextCompat.startForegroundService(ctx, i); DebugLog.add("Service d'arrière-plan démarré") } catch (e: Exception) { DebugLog.add("Service refusé : ${e.message}") }
         } else {
             ctx.stopService(i)

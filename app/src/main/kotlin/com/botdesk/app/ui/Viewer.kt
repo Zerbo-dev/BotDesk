@@ -93,6 +93,15 @@ fun kindOf(name: String, mime: String, path: String): Kind {
     }
 }
 
+fun quickKind(name: String, mime: String): Kind? {
+    val ext = name.substringAfterLast('.', "").lowercase()
+    return when {
+        mime.startsWith("video/") || ext in VIDEO_EXTS -> Kind.Video
+        mime.startsWith("audio/") || ext in AUDIO_EXTS -> Kind.Audio
+        else -> null
+    }
+}
+
 private data class Loaded(val path: String?, val kind: Kind?, val done: Boolean)
 
 @Composable
@@ -100,7 +109,9 @@ fun ViewerScreen(req: ViewerRequest, onClose: () -> Unit) {
     val app = LocalApp.current
     val ctx = LocalContext.current
     val progress by app.tg.downloads.collectAsState()
+    val stream = remember(req.file.id) { quickKind(req.name, req.mime) }
     val loaded by produceState(Loaded(null, null, false), req.file.id) {
+        if (stream != null) { value = Loaded(null, stream, true); return@produceState }
         val p = try {
             val d = app.tg.download(req.file.id)
             if (d.local.isDownloadingCompleted) d.local.path else null
@@ -120,6 +131,7 @@ fun ViewerScreen(req: ViewerRequest, onClose: () -> Unit) {
         )
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
+                stream != null -> StreamMedia(req.file, req.mime, stream == Kind.Audio)
                 !loaded.done -> Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     ProgressRing(progress[req.file.id]); Spacer(Modifier.height(12.dp)); Text("Téléchargement…")
                 }

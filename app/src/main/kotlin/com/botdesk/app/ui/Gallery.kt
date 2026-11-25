@@ -107,54 +107,15 @@ private fun GalleryVideo(
     onTap: () -> Unit,
 ) {
     val app = LocalApp.current
-    val ctx = LocalContext.current
-    val progress by app.tg.downloads.collectAsState()
     val thumb by produceState<ImageBitmap?>(null, item.thumb?.id) { value = item.thumb?.let { loadBitmap(app, it, 720) } }
-    var path by remember(item.msgId) { mutableStateOf<String?>(null) }
-    var error by remember(item.msgId) { mutableStateOf(false) }
-
     if (active) {
-        LaunchedEffect(item.msgId) {
-            try {
-                val d = app.tg.download(item.file.id)
-                if (d.local.isDownloadingCompleted) path = d.local.path else error = true
-            } catch (e: Exception) { error = true }
-        }
-    }
-
-    val p = path
-    if (active && p != null) {
-        val exo = remember(p) {
-            AudioController.stop()
-            ExoPlayer.Builder(ctx).build().apply {
-                setMediaItem(MediaItem.fromUri(Uri.fromFile(File(p))))
-                prepare()
-                playWhenReady = true
-            }
-        }
-        DisposableEffect(exo) {
-            onPlayer(exo)
-            val l = object : Player.Listener {
-                override fun onPlaybackStateChanged(state: Int) {
-                    if (state == Player.STATE_READY) onDuration(exo.duration.coerceAtLeast(0L))
-                }
-            }
-            exo.addListener(l)
-            onDispose { exo.removeListener(l); exo.release(); onPlayer(null) }
-        }
-        AndroidView(
-            factory = { c -> PlayerView(c).apply { player = exo; useController = true } },
-            modifier = Modifier.fillMaxSize(),
-        )
+        // Lecture progressive : la vidéo démarre avant la fin du téléchargement
+        StreamPlayerView(item.file, item.mime, false, thumb, onPlayer, onDuration)
     } else {
         Box(Modifier.fillMaxSize().clickable { onTap() }, contentAlignment = Alignment.Center) {
             thumb?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }
-            when {
-                error -> Text("Lecture impossible", color = Color.White)
-                active -> ProgressRing(progress[item.file.id])
-                else -> Box(Modifier.size(64.dp).clip(CircleShape).background(Color(0x99000000)), contentAlignment = Alignment.Center) {
-                    PlayPauseIcon(false, Color.White, 28.dp)
-                }
+            Box(Modifier.size(64.dp).clip(CircleShape).background(Color(0x99000000)), contentAlignment = Alignment.Center) {
+                PlayPauseIcon(false, Color.White, 28.dp)
             }
         }
     }

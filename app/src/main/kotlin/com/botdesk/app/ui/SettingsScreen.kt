@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 
 package com.botdesk.app.ui
 
@@ -17,10 +17,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.core.content.ContextCompat
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -107,9 +110,143 @@ fun SettingsScreen(activity: FragmentActivity) {
 
     val version = remember { try { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName } catch (e: Exception) { "?" } }
 
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        item { Text("Paramètres", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 16.dp)) }
+    val pageTitles = mapOf(
+        "securite" to "Sécurité et compte", "bots" to "Bots et alertes", "apparence" to "Apparence",
+        "voix" to "Voix", "notifs" to "Notifications", "stockage" to "Stockage et téléchargements", "config" to "Configuration et à propos",
+    )
+    var page by remember { mutableStateOf<String?>(null) }
+    androidx.activity.compose.BackHandler(enabled = page != null) { page = null }
 
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        if (page == null) {
+            item { ScreenHeader("Réglages", "Personnalisez BotDesk") }
+            item { SettingsRow("🔒", "Sécurité et compte", if (pinSet) "PIN activé" else "PIN désactivé") { page = "securite" } }
+            item { SettingsRow("🤖", "Bots et alertes", "${cfg.categories.size} catégorie(s) · mots-clés d'alerte") { page = "bots" } }
+            item { SettingsRow("🔔", "Notifications", when (cfg.notifyBots) { "off" -> "Désactivées"; "alerts" -> "Alertes seulement"; else -> "Tous les messages" } + if (cfg.backgroundService) " · connexion permanente" else "") { page = "notifs" } }
+            item { SettingsRow("🎙", "Voix", if (cfg.ttsEngine == "eleven") "ElevenLabs" else "Voix du téléphone") { page = "voix" } }
+            item { SettingsRow("🎨", "Apparence", when (cfg.theme) { "light" -> "Thème clair"; "system" -> "Thème du système"; else -> "Thème sombre" }) { page = "apparence" } }
+            item { SettingsRow("💾", "Stockage et téléchargements", if (cfg.downloadDir.isBlank()) "Aucun dossier choisi" else DownloadDir.label(cfg.downloadDir)) { page = "stockage" } }
+            item { SettingsRow("⚙", "Configuration et à propos", "Export, import, version") { page = "config" } }
+            item { Spacer(Modifier.height(24.dp)) }
+        } else {
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)) {
+                    IconButton(onClick = { page = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") }
+                    Text(pageTitles[page] ?: "", style = MaterialTheme.typography.headlineSmall)
+                }
+            }
+        }
+
+        if (page == "stockage") {
+            item { SectionTitle("Où vont mes fichiers ?") }
+            item {
+                AppCard(Modifier.fillMaxWidth()) {
+                    val stats by produceState<Pair<Long, Map<String, Long>>?>(null, storageTick) {
+                        value = try { app.tg.storageByType() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { null }
+                    }
+                    val extra = remember(storageTick) {
+                        val tts = ctx.cacheDir.listFiles { f -> f.name.startsWith("tts_") }?.sumOf { it.length() } ?: 0L
+                        val av = java.io.File(ctx.filesDir, "avatars").listFiles()?.sumOf { it.length() } ?: 0L
+                        tts to av
+                    }
+                    Text(
+                        "Tout ce que vous ouvrez (photos, vidéos, audios, documents) est gardé dans le cache privé de BotDesk : il n'apparaît pas dans votre galerie. " +
+                            "Seuls les fichiers que vous enregistrez vont dans votre dossier.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    val st = stats
+                    if (st == null) {
+                        Text("Calcul en cours…")
+                    } else {
+                        Text("Cache Telegram : " + fmtSize(st.first), style = MaterialTheme.typography.titleSmall)
+                        st.second.entries.filter { it.value > 0 }.sortedByDescending { it.value }.forEach { (k, v) ->
+                            val label = when (k) {
+                                "Photo" -> "Photos"; "Video" -> "Vidéos"; "VideoNote" -> "Messages vidéo"; "Audio" -> "Audios"
+                                "VoiceNote" -> "Messages vocaux"; "Document" -> "Documents"; "Animation" -> "GIF"
+                                "Thumbnail" -> "Vignettes"; "ProfilePhoto" -> "Photos de profil"; else -> k
+                            }
+                            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                                Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                Text(fmtSize(v), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                    Text(
+                        "Voix générées : " + fmtSize(extra.first) + " · Avatars : " + fmtSize(extra.second),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                    Text("Vider une catégorie", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 10.dp))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("photos" to "Photos", "videos" to "Vidéos", "audios" to "Audios", "documents" to "Documents").forEach { (k, l) ->
+                            OutlinedButton(onClick = {
+                                scope.launch {
+                                    try { app.tg.clearCategory(k); toast(ctx, "$l : cache vidé") } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { toast(ctx, "Impossible : " + e.message) }
+                                    storageTick++
+                                }
+                            }, contentPadding = PaddingValues(horizontal = 12.dp)) { Text(l) }
+                        }
+                    }
+                    TextButton(onClick = {
+                        ctx.cacheDir.listFiles { f -> f.name.startsWith("tts_") }?.forEach { it.delete() }
+                        storageTick++
+                        toast(ctx, "Cache vocal vidé")
+                    }) { Text("Vider le cache vocal") }
+                }
+            }
+
+            item { SectionTitle("Nettoyage automatique") }
+            item {
+                AppCard(Modifier.fillMaxWidth()) {
+                    Text("Limite de taille du cache", style = MaterialTheme.typography.bodyMedium)
+                    ChipRow(listOf("500" to "500 Mo", "1000" to "1 Go", "3000" to "3 Go", "0" to "Défaut"), cfg.cacheLimitMb.toString()) { v -> app.store.update { it.copy(cacheLimitMb = v.toInt()) } }
+                    Text("Supprimer les fichiers non ouverts depuis", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 10.dp))
+                    ChipRow(listOf("7" to "7 jours", "30" to "30 jours", "90" to "90 jours", "0" to "Défaut"), cfg.cacheTtlDays.toString()) { v -> app.store.update { it.copy(cacheTtlDays = v.toInt()) } }
+                    Text(
+                        "Appliqué toutes les 6 heures. Les fichiers ouverts depuis moins d'une heure sont épargnés. Vos fichiers enregistrés ne sont jamais touchés.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp),
+                    )
+                    TextButton(onClick = {
+                        scope.launch {
+                            try {
+                                app.tg.optimize(if (cfg.cacheLimitMb > 0) cfg.cacheLimitMb * 1_000_000L else -1L, if (cfg.cacheTtlDays > 0) cfg.cacheTtlDays * 86_400 else -1)
+                                toast(ctx, "Nettoyage effectué")
+                            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { toast(ctx, "Impossible : " + e.message) }
+                            storageTick++
+                        }
+                    }) { Text("Nettoyer maintenant") }
+                }
+            }
+
+            item { SectionTitle("Téléchargements en arrière-plan") }
+            item {
+                AppCard(Modifier.fillMaxWidth()) {
+                    val tasks by app.downloads.tasks.collectAsState()
+                    val progress by app.tg.downloads.collectAsState()
+                    if (tasks.isEmpty()) {
+                        Text("Aucun téléchargement. Quand un dossier est choisi, « Enregistrer » télécharge en arrière-plan : vous pouvez changer d'écran sans rien perdre.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    tasks.forEach { t ->
+                        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(t.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                                    Text(
+                                        when (t.state) { "running" -> "En cours" + (progress[t.fileId]?.let { " · " + (it * 100).toInt() + " %" } ?: ""); "done" -> "Terminé · " + t.message; "cancelled" -> "Annulé"; else -> "Échec · " + t.message },
+                                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                if (t.state == "running") TextButton(onClick = { app.downloads.cancel(t) }) { Text("Annuler") }
+                            }
+                            if (t.state == "running") LinearProgressIndicator(progress = { progress[t.fileId] ?: 0f }, modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                    if (tasks.any { it.state != "running" }) TextButton(onClick = { app.downloads.clearFinished() }) { Text("Effacer la liste") }
+                }
+            }
+        }
+        if (page == "securite") {
         item { SectionTitle("Sécurité") }
         item { AppCard(Modifier.fillMaxWidth()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -126,6 +263,8 @@ fun SettingsScreen(activity: FragmentActivity) {
             Text("Le verrouillage s'applique dès que l'app passe en arrière-plan.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } }
 
+        }
+        if (page == "bots") {
         item { SectionTitle("Catégories de bots") }
         items(cfg.categories.size) { i ->
             val c = cfg.categories[i]
@@ -142,6 +281,8 @@ fun SettingsScreen(activity: FragmentActivity) {
         }
         item { TextButton(onClick = { dlg = Dlg.NewCategory }) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(4.dp)); Text("Nouvelle catégorie") } }
 
+        }
+        if (page == "bots") {
         item { SectionTitle("Alertes et actions sensibles") }
         item { AppCard(Modifier.fillMaxWidth()) {
             var alerts by remember(cfg.alertKeywords) { mutableStateOf(cfg.alertKeywords) }
@@ -152,11 +293,15 @@ fun SettingsScreen(activity: FragmentActivity) {
             TextButton(onClick = { app.store.update { it.copy(alertKeywords = alerts, sensitiveKeywords = sens) }; toast(ctx, "Enregistré") }) { Text("Enregistrer les mots-clés") }
         } }
 
+        }
+        if (page == "apparence") {
         item { SectionTitle("Apparence") }
         item { AppCard(Modifier.fillMaxWidth()) {
             ChipRow(listOf("system" to "Système", "dark" to "Sombre", "light" to "Clair"), cfg.theme) { v -> app.store.update { it.copy(theme = v) } }
         } }
 
+        }
+        if (page == "voix") {
         item { SectionTitle("Voix") }
         item { AppCard(Modifier.fillMaxWidth()) {
             Text("Langue de dictée et de lecture", style = MaterialTheme.typography.bodyMedium)
@@ -220,6 +365,8 @@ fun SettingsScreen(activity: FragmentActivity) {
             )
         } }
 
+        }
+        if (page == "notifs") {
         item { SectionTitle("Notifications") }
         item { AppCard(Modifier.fillMaxWidth()) {
             Text("Messages des bots", style = MaterialTheme.typography.bodyMedium)
@@ -232,7 +379,7 @@ fun SettingsScreen(activity: FragmentActivity) {
                 Switch(cfg.notifyBackups, { on -> app.store.update { it.copy(notifyBackups = on) }; if (on) ensureNotifPermission() })
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Rester connecté en arrière-plan", Modifier.weight(1f))
+                Text("Rester connecté en arrière-plan (notification discrète)", Modifier.weight(1f))
                 Switch(cfg.backgroundService, { on ->
                     app.store.update { it.copy(backgroundService = on) }
                     if (on) ensureNotifPermission()
@@ -248,6 +395,8 @@ fun SettingsScreen(activity: FragmentActivity) {
             )
         } }
 
+        }
+        if (page == "notifs") {
         item { SectionTitle("Diagnostic des notifications") }
         item {
             AppCard(Modifier.fillMaxWidth()) {
@@ -288,6 +437,8 @@ fun SettingsScreen(activity: FragmentActivity) {
             }
         }
 
+        }
+        if (page == "stockage") {
         item { SectionTitle("Stockage et téléchargements") }
         item { AppCard(Modifier.fillMaxWidth()) {
             Text("Dossier d'enregistrement des fichiers", style = MaterialTheme.typography.titleSmall)
@@ -331,6 +482,8 @@ fun SettingsScreen(activity: FragmentActivity) {
             }) { Text("Vider le cache de téléchargement") }
         } }
 
+        }
+        if (page == "stockage") {
         item { SectionTitle("Historique des fichiers") }
         item { AppCard(Modifier.fillMaxWidth()) {
             Text("${indexed.size} fichier(s) indexé(s) (métadonnées uniquement)")
@@ -342,6 +495,8 @@ fun SettingsScreen(activity: FragmentActivity) {
             TextButton(onClick = { app.index.clear(); toast(ctx, "Historique vidé") }) { Text("Vider l'historique") }
         } }
 
+        }
+        if (page == "config") {
         item { SectionTitle("Configuration") }
         item { AppCard(Modifier.fillMaxWidth()) {
             Text("Catégories, favoris, noms, canaux de sauvegarde et mots-clés. Ni session Telegram, ni PIN, ni clés API.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -351,13 +506,18 @@ fun SettingsScreen(activity: FragmentActivity) {
             }
         } }
 
+        }
+        if (page == "securite") {
         item { SectionTitle("Compte") }
         item { OutlinedButton(onClick = { dlg = Dlg.Logout }) { Text("Se déconnecter de Telegram") } }
 
+        }
+        if (page == "config") {
         item {
             SectionTitle("À propos")
             Text("BotDesk $version · Client Telegram (TDLib) pour piloter vos bots. Aucun serveur BotDesk : tout reste sur ce téléphone.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(32.dp))
+        }
         }
     }
 
@@ -496,9 +656,28 @@ private fun PasswordDialog(title: String, confirmField: Boolean, onDismiss: () -
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChipRow(options: List<Pair<String, String>>, selected: String, onSelect: (String) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         options.forEach { (value, label) -> FilterChip(selected == value, { onSelect(value) }, { Text(label) }) }
+    }
+}
+
+@Composable
+private fun SettingsRow(emoji: String, title: String, subtitle: String, onClick: () -> Unit) {
+    AppCard(Modifier.fillMaxWidth().padding(vertical = 4.dp), onClick = onClick) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(42.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).background(Accent.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center,
+            ) { Text(emoji, style = MaterialTheme.typography.titleMedium) }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            }
+            Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }

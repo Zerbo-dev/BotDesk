@@ -217,6 +217,8 @@ fun AutoPlayScreen(req: AutoPlayRequest, onClose: () -> Unit) {
                 val nx = l.getOrNull(l.indexOf(item) + if (forwardRef) 1 else -1)
                 if (nx != null) scope.launch { try { tg.download(nx.file.id) } catch (e: Exception) { } }
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             status = "Impossible de lire « ${item.title} » : ${e.message}"
             delay(1500)
@@ -285,7 +287,7 @@ fun AutoPlayScreen(req: AutoPlayRequest, onClose: () -> Unit) {
             OutlinedButton(onClick = { step(1) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("⏭") }
             FilterChip(
                 selected = true, onClick = { forward = !forward; lastAdvanced = -1L },
-                label = { Text(if (forward) "Sens : ancien → récent" else "Sens : récent → ancien") },
+                label = { Text(if (forward) "Sens : vers les plus récents" else "Sens : vers les plus anciens") },
             )
         }
     }

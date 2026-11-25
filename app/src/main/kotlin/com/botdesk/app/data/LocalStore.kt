@@ -33,7 +33,7 @@ data class AppConfig(
     /** "off" | "alerts" | "all" */
     val notifyBots: String = "all",
     val notifyBackups: Boolean = true,
-    val backgroundService: Boolean = true,
+    val backgroundService: Boolean = false,
     /** "dark" | "light" | "system" */
     val theme: String = "dark",
     /** Demander confirmation avant de télécharger un fichier plus gros (en Mo). 0 = jamais. */
@@ -61,6 +61,11 @@ data class AppConfig(
     /** Lecture automatique : durée d'une photo (s) et reprise en boucle. */
     val autoPhotoSec: Int = 5,
     val autoLoop: Boolean = false,
+    /** Nettoyage automatique du cache TDLib : limite (Mo, 0 = défaut) et ancienneté (jours, 0 = défaut). */
+    val cacheLimitMb: Int = 1000,
+    val cacheTtlDays: Int = 30,
+    /** Version des réglages (sert aux migrations). */
+    val uiVersion: Int = 4,
 ) {
     fun toJson(forExport: Boolean = false): JSONObject = JSONObject().apply {
         put("app", "botdesk")
@@ -106,6 +111,9 @@ data class AppConfig(
         put("skipRandom", skipRandom)
         put("autoPhotoSec", autoPhotoSec)
         put("autoLoop", autoLoop)
+        put("cacheLimitMb", cacheLimitMb)
+        put("cacheTtlDays", cacheTtlDays)
+        put("uiVersion", uiVersion)
         put("subfolderPerSource", subfolderPerSource)
         if (!forExport) put("downloadDir", downloadDir)
     }
@@ -149,7 +157,7 @@ data class AppConfig(
                 sensitiveKeywords = o.str("sensitiveKeywords") ?: DEFAULT_SENSITIVE_KEYWORDS,
                 notifyBots = o.str("notifyBots") ?: "all",
                 notifyBackups = o.optBoolean("notifyBackups", true),
-                backgroundService = o.optBoolean("backgroundService", true),
+                backgroundService = o.optBoolean("backgroundService", false),
                 theme = o.str("theme") ?: "dark",
                 confirmDownloadMb = o.optInt("confirmDownloadMb", 100),
                 indexRetentionDays = o.optInt("indexRetentionDays", 90),
@@ -168,6 +176,9 @@ data class AppConfig(
                 skipRandom = o.optBoolean("skipRandom", true),
                 autoPhotoSec = o.optInt("autoPhotoSec", 5),
                 autoLoop = o.optBoolean("autoLoop", false),
+                cacheLimitMb = o.optInt("cacheLimitMb", 1000),
+                cacheTtlDays = o.optInt("cacheTtlDays", 30),
+                uiVersion = o.optInt("uiVersion", 0),
                 subfolderPerSource = o.optBoolean("subfolderPerSource", false),
             )
         }
@@ -180,7 +191,12 @@ class LocalStore(context: Context) {
     val config = MutableStateFlow(load())
 
     private fun load(): AppConfig = try {
-        if (file.exists()) AppConfig.fromJson(JSONObject(file.readText())) else AppConfig()
+        if (file.exists()) {
+            AppConfig.fromJson(JSONObject(file.readText())).let {
+                // Migration : la notification permanente « Connexion Telegram active » est désormais désactivée par défaut
+                if (it.uiVersion < 4) it.copy(backgroundService = false, uiVersion = 4) else it
+            }
+        } else AppConfig()
     } catch (e: Exception) {
         AppConfig()
     }

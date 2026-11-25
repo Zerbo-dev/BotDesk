@@ -116,6 +116,7 @@ object AudioController {
         queue = if (newQueue.any { it.file.id == item.file.id }) newQueue else listOf(item)
         now.value = item
         loadingId.value = item.file.id
+        a.notifier.syncService()
         val t = ++token
         a.scope.launch {
             try {
@@ -484,20 +485,10 @@ fun AudioRow(
                     onSeek = { f -> if (mine) { AudioController.seekTo(f); pos = f } },
                 )
             } else {
-                Slider(
-                    value = if (mine) pos else 0f,
-                    onValueChange = { pos = it; dragging = true },
-                    onValueChangeFinished = { AudioController.seekTo(pos); dragging = false },
-                    enabled = mine,
-                    colors = SliderDefaults.colors(
-                        thumbColor = accent,
-                        activeTrackColor = accent,
-                        inactiveTrackColor = accent.copy(alpha = 0.3f),
-                        disabledThumbColor = accent.copy(alpha = 0.55f),
-                        disabledActiveTrackColor = accent.copy(alpha = 0.55f),
-                        disabledInactiveTrackColor = accent.copy(alpha = 0.3f),
-                    ),
-                    modifier = Modifier.height(28.dp),
+                SeekBar(
+                    progress = if (mine) pos else 0f, active = accent, inactive = accent.copy(alpha = 0.3f), enabled = mine,
+                    onSeekStart = { dragging = true }, onSeek = { pos = it },
+                    onSeekEnd = { AudioController.seekTo(it); pos = it; dragging = false },
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {

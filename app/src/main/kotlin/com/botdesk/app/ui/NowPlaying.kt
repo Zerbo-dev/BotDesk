@@ -95,11 +95,10 @@ fun NowPlayingScreen(onClose: () -> Unit) {
                 Text(item.title, color = Color.White, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (item.subtitle.isNotBlank()) Text(item.subtitle, color = Color(0xCCFFFFFF), style = MaterialTheme.typography.bodyMedium, maxLines = 1)
                 Spacer(Modifier.height(12.dp))
-                Slider(
-                    value = pos,
-                    onValueChange = { pos = it; dragging = true },
-                    onValueChangeFinished = { AudioController.seekTo(pos); dragging = false },
-                    colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.White, inactiveTrackColor = Color(0x55FFFFFF)),
+                SeekBar(
+                    progress = pos, active = Color.White, inactive = Color(0x55FFFFFF), enabled = true,
+                    onSeekStart = { dragging = true }, onSeek = { pos = it },
+                    onSeekEnd = { AudioController.seekTo(it); pos = it; dragging = false },
                 )
                 Row(Modifier.fillMaxWidth()) {
                     val total = item.durationSec

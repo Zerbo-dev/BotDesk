@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -414,7 +415,7 @@ fun ChatScreen(
                 Modifier.align(Alignment.BottomEnd).padding(12.dp).size(42.dp).clip(CircleShape).background(Accent)
                     .clickable { scope.launch { listState.animateScrollToItem(0) } },
                 contentAlignment = Alignment.Center,
-            ) { Text("↓", color = Color.White, style = MaterialTheme.typography.titleMedium) }
+            ) { Icon(Icons.Default.KeyboardArrowDown, "Aller en bas", tint = Color.White) }
         }
         }
 

@@ -278,6 +278,62 @@ class Telegram(
         return request(r)
     }
 
+    suspend fun getFile(id: Int): TdApi.File = request(TdApi.GetFile(id))
+
+    suspend fun cancelDownload(fileId: Int) {
+        val r = TdApi.CancelDownloadFile()
+        r.fileId = fileId
+        r.onlyIfPending = false
+        request(r)
+    }
+
+    /** Taille du cache TDLib : total et détail par type de fichier. */
+    suspend fun storageByType(): Pair<Long, Map<String, Long>> {
+        val r = TdApi.GetStorageStatistics()
+        r.chatLimit = 0
+        val st = request(r)
+        val m = mutableMapOf<String, Long>()
+        st.byChat?.filterNotNull()?.forEach { c ->
+            c.byFileType?.filterNotNull()?.forEach { t ->
+                val k = t.fileType.javaClass.simpleName.removePrefix("FileType")
+                m[k] = (m[k] ?: 0L) + t.size
+            }
+        }
+        return st.size to m
+    }
+
+    /** Nettoyage automatique : garde le cache sous [limitBytes] et supprime ce qui n'a pas servi depuis [ttlSeconds] (-1 = défaut). */
+    suspend fun optimize(limitBytes: Long, ttlSeconds: Int) {
+        val r = TdApi.OptimizeStorage()
+        r.size = limitBytes
+        r.ttl = ttlSeconds
+        r.count = -1
+        r.immunityDelay = 3600
+        r.fileTypes = arrayOf<TdApi.FileType>()
+        r.chatIds = LongArray(0)
+        r.excludeChatIds = LongArray(0)
+        request(r)
+    }
+
+    /** Vide une catégorie du cache : "photos", "videos", "audios" ou "documents". */
+    suspend fun clearCategory(category: String) {
+        val types: Array<TdApi.FileType> = when (category) {
+            "photos" -> arrayOf(TdApi.FileTypePhoto())
+            "videos" -> arrayOf(TdApi.FileTypeVideo(), TdApi.FileTypeVideoNote())
+            "audios" -> arrayOf(TdApi.FileTypeAudio(), TdApi.FileTypeVoiceNote())
+            else -> arrayOf(TdApi.FileTypeDocument())
+        }
+        val r = TdApi.OptimizeStorage()
+        r.size = 0L
+        r.ttl = -1
+        r.count = -1
+        r.immunityDelay = 0
+        r.fileTypes = types
+        r.chatIds = LongArray(0)
+        r.excludeChatIds = LongArray(0)
+        request(r)
+    }
+
     suspend fun getMessage(chatId: Long, messageId: Long): TdApi.Message = request(TdApi.GetMessage(chatId, messageId))
 
     suspend fun sendText(chatId: Long, text: String): TdApi.Message {

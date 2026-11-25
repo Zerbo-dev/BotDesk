@@ -3,6 +3,17 @@
 package com.botdesk.app.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -122,5 +133,47 @@ fun dayLabel(sec: Int): String {
         k == today -> "Aujourd'hui"
         k == today - 1 -> "Hier"
         else -> SimpleDateFormat("d MMMM yyyy", Locale.getDefault()).format(Date(sec * 1000L))
+    }
+}
+
+/** Barre de progression fine et touchable (toucher ou glisser pour se déplacer dans la piste). */
+@Composable
+fun SeekBar(
+    progress: Float,
+    active: Color,
+    inactive: Color,
+    enabled: Boolean,
+    onSeekStart: () -> Unit,
+    onSeek: (Float) -> Unit,
+    onSeekEnd: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var last by remember { mutableStateOf(0f) }
+    Canvas(
+        modifier.fillMaxWidth().height(24.dp)
+            .pointerInput(enabled) {
+                if (enabled) detectTapGestures { off -> onSeekEnd((off.x / size.width).coerceIn(0f, 1f)) }
+            }
+            .pointerInput(enabled) {
+                if (enabled) detectHorizontalDragGestures(
+                    onDragStart = { onSeekStart() },
+                    onDragEnd = { onSeekEnd(last) },
+                    onDragCancel = { onSeekEnd(last) },
+                    onHorizontalDrag = { change, _ ->
+                        last = (change.position.x / size.width).coerceIn(0f, 1f)
+                        onSeek(last)
+                    },
+                )
+            },
+    ) {
+        val cy = this.size.height / 2
+        val th = 4.dp.toPx()
+        drawRoundRect(inactive, Offset(0f, cy - th / 2), Size(this.size.width, th), CornerRadius(th / 2))
+        val w = this.size.width * progress.coerceIn(0f, 1f)
+        drawRoundRect(active, Offset(0f, cy - th / 2), Size(w, th), CornerRadius(th / 2))
+        if (enabled) {
+            val r = 6.dp.toPx()
+            drawCircle(active, r, Offset(w.coerceIn(r, this.size.width - r), cy))
+        }
     }
 }

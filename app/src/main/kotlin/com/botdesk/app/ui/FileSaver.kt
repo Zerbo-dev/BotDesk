@@ -53,6 +53,14 @@ fun rememberFileSaver(): (BackupFile) -> Unit {
     }
 
     fun start(f: BackupFile) {
+        val c0 = app.store.config.value
+        if (c0.downloadDir.isNotBlank() && !c0.askEachTime) {
+            // Dossier choisi : le téléchargement continue au niveau de l'app, même si on change d'écran
+            val t = app.tg.chat(f.chatId)?.title ?: ""
+            app.downloads.saveToFolder(f, c0.downloadDir, if (c0.subfolderPerSource && t.isNotBlank()) t else null)
+            toast(ctx, "Téléchargement lancé en arrière-plan : " + f.doc.fileName.ifBlank { "fichier" } + " (suivi dans Réglages > Stockage)")
+            return
+        }
         scope.launch {
             toast(ctx, "Téléchargement en cours…")
             try {

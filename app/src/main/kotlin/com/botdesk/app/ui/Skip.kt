@@ -57,9 +57,10 @@ fun SurvolEffect(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChipsRow(options: List<Pair<String, String>>, selected: String, onSelect: (String) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         options.forEach { (v, l) -> FilterChip(selected == v, { onSelect(v) }, { Text(l) }) }
     }
 }
